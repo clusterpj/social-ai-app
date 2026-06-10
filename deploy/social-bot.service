@@ -1,0 +1,17 @@
+[Unit]
+Description=Social Command Center bot
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/social-bot
+ExecStart=/usr/local/bin/bun run src/index.ts
+EnvironmentFile=/opt/social-bot/.env
+Restart=always
+RestartSec=3
+User=socialbot
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/social-bot/data
+
+[Install]
+WantedBy=multi-user.target
