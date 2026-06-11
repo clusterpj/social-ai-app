@@ -130,3 +130,150 @@ export function dbHealthy(): boolean {
     return false;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Draft CRUD
+// ---------------------------------------------------------------------------
+
+export type DraftKind = "post" | "dream";
+export type DraftStatus = "pending" | "published" | "failed" | "cancelled";
+
+export interface Draft {
+  id: string;
+  chatId: number;
+  kind: DraftKind;
+  prompt: string;
+  imagePath: string | null;
+  copyJson: string; // JSON string of Record<Platform, string>
+  status: DraftStatus;
+  previewMsg: number | null;
+  error: string | null;
+  createdAt: number;
+  publishedAt: number | null;
+}
+
+export function insertDraft(draft: {
+  id: string;
+  chatId: number;
+  kind: DraftKind;
+  prompt: string;
+  imagePath: string | null;
+  copyJson: string;
+}): void {
+  db.run(
+    `INSERT INTO drafts (id, chat_id, kind, prompt, image_path, copy_json, status, created_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7)`,
+    [
+      draft.id,
+      draft.chatId,
+      draft.kind,
+      draft.prompt,
+      draft.imagePath,
+      draft.copyJson,
+      Date.now(),
+    ],
+  );
+}
+
+export function getDraft(id: string): Draft | null {
+  const row = db
+    .query<
+      {
+        id: string;
+        chat_id: number;
+        kind: string;
+        prompt: string;
+        image_path: string | null;
+        copy_json: string;
+        status: string;
+        preview_msg: number | null;
+        error: string | null;
+        created_at: number;
+        published_at: number | null;
+      },
+      [string]
+    >("SELECT * FROM drafts WHERE id = ?1")
+    .get(id);
+  if (row === null) return null;
+  return {
+    id: row.id,
+    chatId: row.chat_id,
+    kind: row.kind as DraftKind,
+    prompt: row.prompt,
+    imagePath: row.image_path,
+    copyJson: row.copy_json,
+    status: row.status as DraftStatus,
+    previewMsg: row.preview_msg,
+    error: row.error,
+    createdAt: row.created_at,
+    publishedAt: row.published_at,
+  };
+}
+
+export function updateDraftStatus(
+  id: string,
+  status: DraftStatus,
+  extra?: { error?: string; publishedAt?: number },
+): void {
+  if (extra?.error !== undefined) {
+    db.run(
+      "UPDATE drafts SET status = ?1, error = ?2 WHERE id = ?3",
+      [status, extra.error, id],
+    );
+  } else if (extra?.publishedAt !== undefined) {
+    db.run(
+      "UPDATE drafts SET status = ?1, published_at = ?2 WHERE id = ?3",
+      [status, extra.publishedAt, id],
+    );
+  } else {
+    db.run("UPDATE drafts SET status = ?1 WHERE id = ?2", [status, id]);
+  }
+}
+
+export function updateDraftCopyJson(id: string, copyJson: string): void {
+  db.run("UPDATE drafts SET copy_json = ?1 WHERE id = ?2", [copyJson, id]);
+}
+
+export function updateDraftImagePath(id: string, imagePath: string): void {
+  db.run("UPDATE drafts SET image_path = ?1 WHERE id = ?2", [imagePath, id]);
+}
+
+export function updateDraftPreviewMsg(id: string, messageId: number): void {
+  db.run("UPDATE drafts SET preview_msg = ?1 WHERE id = ?2", [messageId, id]);
+}
+
+// ---------------------------------------------------------------------------
+// Usage tracking
+// ---------------------------------------------------------------------------
+
+export function incrementUsage(
+  chatId: number,
+  day: string,
+  field: "dreams" | "posts",
+): void {
+  db.run(
+    `INSERT INTO usage (chat_id, day, ${field})
+     VALUES (?1, ?2, 1)
+     ON CONFLICT(chat_id, day) DO UPDATE SET ${field} = ${field} + 1`,
+    [chatId, day],
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Media cleanup support
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true if `filename` belongs to a draft still in 'pending' status.
+ * Used by the media cleanup routine to avoid deleting files the user hasn't
+ * acted on yet.
+ */
+export function isMediaPending(filename: string): boolean {
+  const row = db
+    .query<{ id: string }, [string]>(
+      "SELECT id FROM drafts WHERE image_path = ?1 AND status = 'pending'",
+    )
+    .get(filename);
+  return row !== null;
+}
+

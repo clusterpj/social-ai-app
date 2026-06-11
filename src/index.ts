@@ -1,12 +1,15 @@
 import { webhookCallback } from "grammy";
 import { bot } from "./bot";
 import { config, VERSION } from "./config";
-import { db, dbHealthy } from "./db";
+import { db, dbHealthy, isMediaPending } from "./db";
 import { errorFields, log } from "./log";
+import { cleanupOldMedia } from "./media";
 
 const startedAt = Date.now();
 
-const handleUpdate = webhookCallback(bot, "bun", {
+const isLocal = config.PUBLIC_BASE_URL.includes("localhost");
+
+const handleUpdate = isLocal ? null : webhookCallback(bot, "bun", {
   secretToken: config.TELEGRAM_WEBHOOK_SECRET,
 });
 
@@ -19,6 +22,8 @@ const server = Bun.serve({
     const url = new URL(req.url);
 
     if (req.method === "POST" && url.pathname === "/webhook") {
+      if (!handleUpdate) return new Response("Webhooks disabled in local dev", { status: 403 });
+      
       const t0 = performance.now();
       try {
         return await handleUpdate(req);
@@ -58,19 +63,61 @@ const server = Bun.serve({
 
 log("info", "server_started", { port: config.PORT, version: VERSION });
 
-// Fetch bot identity eagerly so /status and logs have it; webhookCallback
-// initializes lazily anyway, so a transient failure here is non-fatal.
 bot.init().then(
-  () => log("info", "bot_initialized", { username: bot.botInfo.username }),
+  () => {
+    log("info", "bot_initialized", { username: bot.botInfo.username });
+    
+    // Set the native Telegram command menu
+    bot.api.setMyCommands([
+      { command: "post", description: "Sube una foto y genera el texto (requiere foto)" },
+      { command: "dream", description: "Genera una imagen y texto con IA (ej: /dream un gato)" },
+      { command: "status", description: "Ver tus cuentas conectadas y límite diario" },
+      { command: "help", description: "Ver instrucciones de uso" },
+    ]).catch((err) => log("warn", "set_commands_failed", errorFields(err)));
+    
+    // If we're running locally, Telegram can't reach our webhook. Switch to polling!
+    if (isLocal) {
+      log("info", "local_dev_mode", { polling: true });
+      bot.api.deleteWebhook().then(() => {
+        bot.start({
+          onStart: (botInfo) => log("info", "bot_polling_started", { username: botInfo.username }),
+        });
+      });
+    }
+  },
   (err: unknown) => log("warn", "bot_init_failed", errorFields(err)),
 );
+
+// Daily media cleanup: remove files older than MEDIA_RETENTION_DAYS
+// whose associated draft is no longer pending.
+const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // once per day
+const cleanupTimer = setInterval(() => {
+  try {
+    cleanupOldMedia(isMediaPending);
+  } catch (err) {
+    log("error", "media_cleanup_error", errorFields(err));
+  }
+}, CLEANUP_INTERVAL_MS);
+
+// Run once at startup too (in case the server was down for a while).
+try {
+  cleanupOldMedia(isMediaPending);
+} catch (err) {
+  log("error", "media_cleanup_startup_error", errorFields(err));
+}
 
 let shuttingDown = false;
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   log("info", "shutdown_started", { signal });
+  clearInterval(cleanupTimer);
   await server.stop(); // graceful: waits for in-flight requests
+  
+  if (isLocal) {
+    await bot.stop();
+  }
+  
   db.close();
   log("info", "shutdown_complete", {});
   process.exit(0);
