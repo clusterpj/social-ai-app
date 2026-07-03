@@ -38,6 +38,37 @@ const server = Bun.serve({
       }
     }
 
+    function checkAuth(request: Request) {
+      const auth = request.headers.get("Authorization");
+      if (!auth || !auth.startsWith("Basic ")) return false;
+      const decoded = atob(auth.slice(6));
+      return decoded === `admin:${config.ADMIN_PASSWORD}`;
+    }
+
+    if (url.pathname === "/admin") {
+      if (!checkAuth(req)) {
+        return new Response("Unauthorized", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="Admin"' } });
+      }
+      const file = Bun.file("public/admin.html");
+      return new Response(file, { headers: { "Content-Type": "text/html" } });
+    }
+
+    if (url.pathname === "/api/settings") {
+      if (!checkAuth(req)) {
+        return new Response("Unauthorized", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="Admin"' } });
+      }
+      if (req.method === "GET") {
+        const { getSettings } = await import("./db");
+        return Response.json(getSettings());
+      }
+      if (req.method === "POST") {
+        const body = await req.json();
+        const { updateSettings } = await import("./db");
+        updateSettings(body as any);
+        return Response.json({ success: true });
+      }
+    }
+
     if (req.method === "GET" && url.pathname === "/health") {
       return Response.json({
         ok: true,

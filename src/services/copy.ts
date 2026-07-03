@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { config } from "../config";
 import { log } from "../log";
+import { getSettings } from "../db";
 import type { Platform } from "./publisher/types";
 
 /**
@@ -242,15 +243,8 @@ export async function generateCopy(
  * Enhance the user's raw prompt for the image generator.
  */
 export async function enhanceImagePrompt(prompt: string, timeoutMs = 15_000): Promise<string> {
-  const systemPrompt = `You are a prompt engineer for an AI image generator (Flux).
-Your job is to rewrite the user's simple idea into a highly detailed visual prompt.
-CRITICAL RULES for TEXT:
-1. If the user wants specific promotional text on the image (e.g., "30% discount"), extract the main punchline (e.g., "30% OFF") and put it inside quotes in your prompt.
-2. Explicitly instruct the AI NOT to generate any fine print, disclaimers, or small text.
-3. Keep the requested text extremely short (1-5 words).
-Example output prompt: "A high quality photo of a tire shop showroom, bold massive typography in the center saying '30% OFF', clean composition, no extra text, no small text, no fine print."
-
-Output ONLY a JSON object with a single key "prompt".`;
+  const settings = getSettings();
+  const systemPrompt = settings.copySystemPrompt;
 
   try {
     let rawText: string;
@@ -283,5 +277,65 @@ Output ONLY a JSON object with a single key "prompt".`;
     log("error", "enhance_prompt_failed", { error: err instanceof Error ? err.message : String(err) });
     // Fallback to original prompt with hardcoded constraints
     return `${prompt}, bold typography if any text, clean composition, NO fine print, NO small text, NO disclaimers`;
+  }
+}
+
+/**
+ * Result of intent detection for text overlays.
+ */
+export interface TextOverlayIntent {
+  text: string;
+  style: string | null;
+}
+
+/**
+ * Check if the user's post idea requests text to be overlaid on the image.
+ * Returns the text and requested style, or null if no text is requested.
+ */
+export async function extractTextOverlay(prompt: string, timeoutMs = 10_000): Promise<TextOverlayIntent | null> {
+  const systemPrompt = `You are an intent analyzer. The user is posting a photo to social media with an idea/caption.
+Your job is to determine if the user explicitly wants specific promotional text overlaid ON the photo itself.
+If they do, extract ONLY the exact short text they want on the image (e.g. "30% OFF", "OPEN NOW").
+Also, if they describe a specific visual style for that text (e.g., "made of candy canes", "neon signs"), extract that as the style. If no style is specified, style should be null.
+If they do not explicitly ask for text ON the image, return null.
+
+Output ONLY a JSON object with keys "text" (string or null) and "style" (string or null).
+Example input: "Post this with a 30% off banner"
+Example output: {"text": "30% OFF", "style": null}
+Example input: "Add yummy to it in candy canes"
+Example output: {"text": "Yummy", "style": "made of candy canes"}
+Example input: "Write a nice caption for this tire photo"
+Example output: {"text": null, "style": null}`;
+
+  try {
+    let rawText: string;
+    if (config.OPENROUTER_API_KEY) {
+      rawText = await callOpenRouter(systemPrompt, prompt, timeoutMs);
+    } else {
+      try {
+        rawText = await callAnthropic(systemPrompt, prompt, timeoutMs);
+      } catch (anthropicErr) {
+        rawText = await callDeepseek(systemPrompt, prompt, timeoutMs);
+      }
+    }
+
+    const raw = rawText
+      .replace(/^```json?\s*/i, "")
+      .replace(/```\s*$/, "")
+      .trim();
+
+    const parsed = JSON.parse(raw);
+    if (parsed.text && typeof parsed.text === "string") {
+      log("info", "text_overlay_detected", { original: prompt, intent: parsed });
+      return {
+        text: parsed.text,
+        style: typeof parsed.style === "string" ? parsed.style : null,
+      };
+    }
+    
+    return null;
+  } catch (err) {
+    log("error", "extract_text_overlay_failed", { error: err instanceof Error ? err.message : String(err) });
+    return null; // safe fallback
   }
 }

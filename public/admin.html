@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Social Bot Admin</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --glass-bg: rgba(30, 41, 59, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --input-bg: rgba(15, 23, 42, 0.6);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            color: var(--text-main);
+            min-height: 100vh;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem;
+            box-sizing: border-box;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 2.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            animation: fadeUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            margin: 0 0 0.5rem 0;
+            background: linear-gradient(to right, #60a5fa, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        p.subtitle {
+            color: var(--text-muted);
+            margin-bottom: 2rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            color: var(--text-muted);
+        }
+
+        input[type="text"], textarea {
+            width: 100%;
+            background: var(--input-bg);
+            border: 1px solid var(--glass-border);
+            color: var(--text-main);
+            border-radius: 12px;
+            padding: 0.75rem 1rem;
+            font-family: inherit;
+            font-size: 1rem;
+            box-sizing: border-box;
+            transition: all 0.2s ease;
+        }
+
+        input[type="text"]:focus, textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 250px;
+        }
+
+        .range-container {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        input[type="range"] {
+            flex: 1;
+            accent-color: var(--accent);
+        }
+
+        .range-value {
+            background: var(--input-bg);
+            padding: 0.25rem 0.75rem;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            min-width: 3rem;
+            text-align: center;
+            border: 1px solid var(--glass-border);
+        }
+
+        button {
+            width: 100%;
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 1rem;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-top: 1rem;
+        }
+
+        button:hover {
+            background: var(--accent-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
+        }
+        
+        button:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: #10b981;
+            color: white;
+            padding: 1rem 1.5rem;
+            border-radius: 12px;
+            font-weight: 500;
+            box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.3);
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Command Center</h1>
+        <p class="subtitle">Manage AI configuration and access controls</p>
+
+        <form id="settings-form">
+            <div class="form-group">
+                <label for="allowedChatIds">Allowed Telegram Chat IDs (comma separated)</label>
+                <input type="text" id="allowedChatIds" required placeholder="e.g. 123456789,987654321">
+            </div>
+
+            <div class="form-group">
+                <label for="copySystemPrompt">AI Copywriter System Prompt</label>
+                <textarea id="copySystemPrompt" required></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>AI Image Detail Level (Inference Steps)</label>
+                <div class="range-container">
+                    <input type="range" id="fluxInferenceSteps" min="20" max="50" step="1" oninput="updateRange('fluxInferenceSteps')">
+                    <span class="range-value" id="fluxInferenceSteps-val">35</span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>AI Prompt Adherence (Guidance Scale)</label>
+                <div class="range-container">
+                    <input type="range" id="fluxGuidanceScale" min="1.0" max="10.0" step="0.1" oninput="updateRange('fluxGuidanceScale')">
+                    <span class="range-value" id="fluxGuidanceScale-val">3.5</span>
+                </div>
+            </div>
+
+            <button type="submit" id="save-btn">Save Configuration</button>
+        </form>
+    </div>
+
+    <div class="toast" id="toast">Settings saved successfully!</div>
+
+    <script>
+        function updateRange(id) {
+            document.getElementById(id + '-val').textContent = document.getElementById(id).value;
+        }
+
+        async function loadSettings() {
+            try {
+                const res = await fetch('/api/settings');
+                if (!res.ok) throw new Error('Unauthorized');
+                const data = await res.json();
+                
+                document.getElementById('allowedChatIds').value = data.allowedChatIds;
+                document.getElementById('copySystemPrompt').value = data.copySystemPrompt;
+                
+                document.getElementById('fluxInferenceSteps').value = data.fluxInferenceSteps;
+                updateRange('fluxInferenceSteps');
+                
+                document.getElementById('fluxGuidanceScale').value = data.fluxGuidanceScale;
+                updateRange('fluxGuidanceScale');
+            } catch (err) {
+                console.error(err);
+                if (err.message === 'Unauthorized') {
+                    window.location.reload(); 
+                }
+            }
+        }
+
+        document.getElementById('settings-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('save-btn');
+            btn.disabled = true;
+            btn.textContent = 'Saving...';
+
+            const payload = {
+                allowedChatIds: document.getElementById('allowedChatIds').value,
+                copySystemPrompt: document.getElementById('copySystemPrompt').value,
+                fluxInferenceSteps: parseInt(document.getElementById('fluxInferenceSteps').value),
+                fluxGuidanceScale: parseFloat(document.getElementById('fluxGuidanceScale').value),
+            };
+
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const toast = document.getElementById('toast');
+                toast.classList.add('show');
+                setTimeout(() => toast.classList.remove('show'), 3000);
+            } catch (err) {
+                console.error(err);
+                alert("Failed to save settings.");
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Save Configuration';
+            }
+        });
+
+        loadSettings();
+    </script>
+</body>
+</html>

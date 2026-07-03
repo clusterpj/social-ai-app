@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { downloadToMedia, newMediaFilename } from "../media";
 import { enhanceImagePrompt } from "./copy";
+import { getSettings } from "../db";
+import sharp from "sharp";
 
 // Set the API key explicitly so we don't rely on global environment variable side effects
 fal.config({
@@ -102,12 +104,14 @@ export async function generateImage(
   // Currently we use fal.subscribe to poll for the result.
   // The SDK internally handles timeouts, but we can't easily pass AbortSignal.
   // We'll wrap it in a timeout locally just in case.
+  const settings = getSettings();
+
   const fetchTask = fal.subscribe(config.FLUX_MODEL, {
     input: {
       prompt: enhancedPrompt,
       image_size: "landscape_4_3",
-      num_inference_steps: 28, // Good default for quality
-      guidance_scale: 3.5,     // Good default for Flux
+      num_inference_steps: settings.fluxInferenceSteps,
+      guidance_scale: settings.fluxGuidanceScale,
       num_images: 1,
       enable_safety_checker: true,
       sync_mode: false,
@@ -147,6 +151,115 @@ export async function generateImage(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log("error", "image_generation_failed", { error: message });
+    throw err;
+  }
+}
+
+/**
+ * Add a true graphic overlay to an existing image.
+ * Uses AI stylization if a style is requested.
+ * Overwrites the local file.
+ */
+export async function addTextToImage(
+  filename: string,
+  text: string,
+  style: string | null = null,
+  timeoutMs = 60_000,
+): Promise<void> {
+  log("info", "add_text_to_image_started", { filename, text, style });
+
+  const localPath = join(process.cwd(), "data", "media", filename);
+  if (!existsSync(localPath)) {
+    throw new Error(`File not found: ${localPath}`);
+  }
+
+  try {
+    let overlayBuffer: Buffer;
+
+    if (style && config.FAL_KEY && config.FAL_KEY !== "stub") {
+      log("info", "generating_ai_styled_text", { text, style });
+      
+      // 1. Generate text image
+      const textPrompt = `3D typography, the exact word '${text}' constructed entirely out of ${style}, hyper-realistic, isolated on a pure white background.`;
+      const genRes: any = await fal.subscribe(config.FLUX_MODEL, {
+        input: { prompt: textPrompt, image_size: "landscape_4_3" },
+      });
+      const generatedImageUrl = genRes.data?.images?.[0]?.url || genRes.images?.[0]?.url;
+
+      if (!generatedImageUrl) {
+        throw new Error("Failed to generate styled text");
+      }
+
+      log("info", "removing_background", { url: generatedImageUrl });
+
+      // 2. Remove background
+      const rmbgRes: any = await fal.subscribe("fal-ai/bria/background/remove", {
+        input: { image_url: generatedImageUrl },
+      });
+      const transparentUrl = rmbgRes.image?.url || rmbgRes.data?.image?.url;
+
+      if (!transparentUrl) {
+        throw new Error("Failed to remove background");
+      }
+
+      // 3. Download the transparent PNG overlay
+      const overlayReq = await fetch(transparentUrl);
+      overlayBuffer = Buffer.from(await overlayReq.arrayBuffer());
+    } else {
+      // Deterministic SVG fallback
+      log("info", "generating_svg_text_overlay", { text });
+      
+      // We need the dimensions of the original image
+      const metadata = await sharp(localPath).metadata();
+      const width = metadata.width || 800;
+      const height = metadata.height || 600;
+      
+      const bannerHeight = Math.floor(height * 0.2);
+      const fontSize = Math.floor(bannerHeight * 0.6);
+      
+      const svgText = `
+        <svg width="${width}" height="${height}">
+          <style>
+            .title { fill: white; font-size: ${fontSize}px; font-weight: bold; font-family: sans-serif; }
+            .bg { fill: rgba(0,0,0,0.6); }
+          </style>
+          <rect x="0" y="${height - bannerHeight}" width="${width}" height="${bannerHeight}" class="bg" />
+          <text x="50%" y="${height - (bannerHeight / 2) + (fontSize * 0.35)}" text-anchor="middle" class="title">${text}</text>
+        </svg>
+      `;
+      overlayBuffer = Buffer.from(svgText);
+    }
+
+    // 4. Composite the overlay onto the original image
+    log("info", "compositing_overlay", { filename });
+    
+    const originalImage = sharp(localPath);
+    const metadata = await originalImage.metadata();
+    const originalWidth = metadata.width || 800;
+    
+    if (style && config.FAL_KEY && config.FAL_KEY !== "stub") {
+      // For AI overlays, we want to trim the empty space and resize it
+      // to fit nicely at the bottom (e.g. 80% of the original width)
+      const targetWidth = Math.floor(originalWidth * 0.8);
+      
+      overlayBuffer = await sharp(overlayBuffer)
+        .trim() // Removes the transparent background padding
+        .resize({ width: targetWidth })
+        .toBuffer();
+    }
+    
+    // We output to a temporary buffer first
+    const outputBuffer = await originalImage
+      .composite([{ input: overlayBuffer, gravity: 'south' }])
+      .toBuffer();
+
+    // 5. Overwrite the original file
+    await Bun.write(localPath, outputBuffer);
+    
+    log("info", "text_overlay_completed", { filename });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log("error", "add_text_to_image_failed", { error: message });
     throw err;
   }
 }

@@ -1,7 +1,8 @@
 import type { Context } from "grammy";
 import { nanoid } from "nanoid";
 import { getTenant, insertDraft, updateDraftPreviewMsg, incrementUsage, todayUtc } from "../db";
-import { generateCopy } from "../services/copy";
+import { generateCopy, extractTextOverlay } from "../services/copy";
+import { addTextToImage } from "../services/image";
 import { downloadToMedia, newMediaFilename, mediaLocalPath } from "../media";
 import { errorFields, log } from "../log";
 import type { Platform } from "../services/publisher/types";
@@ -123,6 +124,14 @@ export async function postCommand(ctx: Context): Promise<void> {
       draft_id: draftId,
       filename,
     });
+
+    // 1b. Check if we need to overlay text and process image
+    const textOverlay = await extractTextOverlay(prompt);
+    if (textOverlay) {
+      // Show an indicator since AI image processing takes a few seconds
+      await ctx.replyWithChatAction("upload_photo").catch(() => {});
+      await addTextToImage(filename, textOverlay.text, textOverlay.style);
+    }
 
     // 2. Generate per-platform copy via Haiku
     const copyResult = await generateCopy(prompt, tenant.platforms);

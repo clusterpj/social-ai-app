@@ -32,6 +32,7 @@ const envSchema = z.object({
   ZERNIO_API_KEY: cleanString.pipe(z.string().min(1, "required")),
   DAILY_DREAM_LIMIT: z.coerce.number().int().positive().default(20),
   MEDIA_RETENTION_DAYS: z.coerce.number().int().positive().default(14),
+  ADMIN_PASSWORD: cleanString.default("admin"),
 });
 
 export type Config = z.infer<typeof envSchema>;

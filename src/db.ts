@@ -35,6 +35,13 @@ const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (chat_id, day)
   );
   `,
+  // v2 - settings schema
+  `
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+  `,
 ];
 
 mkdirSync("data/media", { recursive: true });
@@ -275,5 +282,58 @@ export function isMediaPending(filename: string): boolean {
     )
     .get(filename);
   return row !== null;
+}
+
+// ---------------------------------------------------------------------------
+// Settings CRUD
+// ---------------------------------------------------------------------------
+
+export interface AppSettings {
+  allowedChatIds: string;
+  fluxInferenceSteps: number;
+  fluxGuidanceScale: number;
+  copySystemPrompt: string;
+}
+
+const defaultSettings: AppSettings = {
+  // We grab initial defaults from config and hardcoded values
+  allowedChatIds: "", // We will populate this from getSettings if not set
+  fluxInferenceSteps: 35,
+  fluxGuidanceScale: 3.5,
+  copySystemPrompt: `You are a prompt engineer for an AI image generator (Flux).
+Your job is to rewrite the user's simple idea into a highly detailed visual prompt.
+CRITICAL RULES:
+1. Quality: Always add tags to ensure maximum quality: "Masterpiece, photorealistic, 8k resolution, ultra-detailed, professional lighting, crisp focus".
+2. If the user wants specific promotional text on the image (e.g., "30% discount"), extract the main punchline (e.g., "30% OFF") and put it inside quotes in your prompt.
+3. Explicitly instruct the AI NOT to generate any fine print, disclaimers, or small text.
+4. Keep the requested text extremely short (1-5 words).
+Example output prompt: "Masterpiece, photorealistic 8k photo of a tire shop showroom, professional lighting, bold massive typography in the center saying '30% OFF', clean composition, no extra text, no small text, no fine print."
+
+Output ONLY a JSON object with a single key "prompt".`
+};
+
+export function getSettings(): AppSettings {
+  const rows = db.query<{ key: string; value: string }, []>("SELECT key, value FROM settings").all();
+  const map = new Map(rows.map(r => [r.key, r.value]));
+  
+  // For allowedChatIds, if not in DB, we fall back to process.env.ALLOWED_CHAT_IDS
+  const fallbackChatIds = process.env.ALLOWED_CHAT_IDS || "";
+  
+  return {
+    allowedChatIds: map.get("allowedChatIds") ?? fallbackChatIds,
+    fluxInferenceSteps: map.has("fluxInferenceSteps") ? Number(map.get("fluxInferenceSteps")) : defaultSettings.fluxInferenceSteps,
+    fluxGuidanceScale: map.has("fluxGuidanceScale") ? Number(map.get("fluxGuidanceScale")) : defaultSettings.fluxGuidanceScale,
+    copySystemPrompt: map.get("copySystemPrompt") ?? defaultSettings.copySystemPrompt,
+  };
+}
+
+export function updateSettings(settings: Partial<AppSettings>): void {
+  const update = db.prepare("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2");
+  db.transaction(() => {
+    if (settings.allowedChatIds !== undefined) update.run("allowedChatIds", settings.allowedChatIds);
+    if (settings.fluxInferenceSteps !== undefined) update.run("fluxInferenceSteps", String(settings.fluxInferenceSteps));
+    if (settings.fluxGuidanceScale !== undefined) update.run("fluxGuidanceScale", String(settings.fluxGuidanceScale));
+    if (settings.copySystemPrompt !== undefined) update.run("copySystemPrompt", settings.copySystemPrompt);
+  })();
 }
 
