@@ -8,10 +8,7 @@ import { enhanceImagePrompt } from "./copy";
 import { getSettings } from "../db";
 import sharp from "sharp";
 
-// Set the API key explicitly so we don't rely on global environment variable side effects
-fal.config({
-  credentials: config.FAL_KEY,
-});
+
 
 /**
  * Call fal.ai to generate an image using Flux, then download it locally.
@@ -30,8 +27,11 @@ export async function generateImage(
 
   const enhancedPrompt = await enhanceImagePrompt(prompt, Math.min(timeoutMs, 15_000));
 
+  const settings = getSettings();
+  fal.config({ credentials: settings.falKey });
+
   // Fallback for local development if FAL_KEY is not set
-  if (!config.FAL_KEY || config.FAL_KEY === "stub") {
+  if (!settings.falKey || settings.falKey === "stub") {
     let usedComfyUI = false;
 
     // Try to use local ComfyUI if workflow exists
@@ -104,9 +104,9 @@ export async function generateImage(
   // Currently we use fal.subscribe to poll for the result.
   // The SDK internally handles timeouts, but we can't easily pass AbortSignal.
   // We'll wrap it in a timeout locally just in case.
-  const settings = getSettings();
+  // We'll wrap it in a timeout locally just in case.
 
-  const fetchTask = fal.subscribe(config.FLUX_MODEL, {
+  const fetchTask = fal.subscribe(settings.fluxModel, {
     input: {
       prompt: enhancedPrompt,
       image_size: "landscape_4_3",
@@ -175,13 +175,15 @@ export async function addTextToImage(
 
   try {
     let overlayBuffer: Buffer;
+    const settings = getSettings();
+    fal.config({ credentials: settings.falKey });
 
-    if (style && config.FAL_KEY && config.FAL_KEY !== "stub") {
+    if (style && settings.falKey && settings.falKey !== "stub") {
       log("info", "generating_ai_styled_text", { text, style });
       
       // 1. Generate text image
       const textPrompt = `3D typography, the exact word '${text}' constructed entirely out of ${style}, hyper-realistic, isolated on a pure white background.`;
-      const genRes: any = await fal.subscribe(config.FLUX_MODEL, {
+      const genRes: any = await fal.subscribe(settings.fluxModel, {
         input: { prompt: textPrompt, image_size: "landscape_4_3" },
       });
       const generatedImageUrl = genRes.data?.images?.[0]?.url || genRes.images?.[0]?.url;
@@ -237,7 +239,7 @@ export async function addTextToImage(
     const metadata = await originalImage.metadata();
     const originalWidth = metadata.width || 800;
     
-    if (style && config.FAL_KEY && config.FAL_KEY !== "stub") {
+    if (style && settings.falKey && settings.falKey !== "stub") {
       // For AI overlays, we want to trim the empty space and resize it
       // to fit nicely at the bottom (e.g. 80% of the original width)
       const targetWidth = Math.floor(originalWidth * 0.8);

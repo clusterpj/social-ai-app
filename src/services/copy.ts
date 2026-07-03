@@ -49,22 +49,23 @@ function buildSystemPrompt(platforms: readonly Platform[]): string {
   return rules.join("\n");
 }
 
-async function callAnthropic(systemPrompt: string, prompt: string, timeoutMs: number): Promise<string> {
-  if (!config.ANTHROPIC_API_KEY) {
+async function callAnthropic(systemPrompt: string, userPrompt: string, timeoutMs: number): Promise<string> {
+  const settings = getSettings();
+  if (!settings.anthropicApiKey) {
     throw new Error("ANTHROPIC_API_KEY is not configured");
   }
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
-      "content-type": "application/json",
-      "x-api-key": config.ANTHROPIC_API_KEY,
+      "x-api-key": settings.anthropicApiKey,
       "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: config.COPY_MODEL,
+      model: "claude-3-5-sonnet-20240620",
       max_tokens: 2048,
       system: systemPrompt,
-      messages: [{ role: "user", content: prompt }],
+      messages: [{ role: "user", content: userPrompt }],
     }),
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -86,21 +87,22 @@ async function callAnthropic(systemPrompt: string, prompt: string, timeoutMs: nu
   return textBlock.text;
 }
 
-async function callDeepseek(systemPrompt: string, prompt: string, timeoutMs: number): Promise<string> {
-  if (!config.DEEPSEEK_API_KEY) {
+async function callDeepseek(systemPrompt: string, userPrompt: string, timeoutMs: number): Promise<string> {
+  const settings = getSettings();
+  if (!settings.deepseekApiKey) {
     throw new Error("DEEPSEEK_API_KEY is not configured");
   }
   const res = await fetch("https://api.deepseek.com/chat/completions", {
     method: "POST",
     headers: {
-      "content-type": "application/json",
-      "Authorization": `Bearer ${config.DEEPSEEK_API_KEY}`,
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${settings.deepseekApiKey}`,
     },
     body: JSON.stringify({
       model: "deepseek-chat",
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: prompt },
+        { role: "user", content: userPrompt },
       ],
       response_format: { type: "json_object" },
     }),
@@ -121,21 +123,22 @@ async function callDeepseek(systemPrompt: string, prompt: string, timeoutMs: num
   return content;
 }
 
-async function callOpenRouter(systemPrompt: string, prompt: string, timeoutMs: number): Promise<string> {
-  if (!config.OPENROUTER_API_KEY) {
+async function callOpenRouter(systemPrompt: string, userPrompt: string, timeoutMs: number): Promise<string> {
+  const settings = getSettings();
+  if (!settings.openRouterApiKey) {
     throw new Error("OPENROUTER_API_KEY is not configured");
   }
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
-      "content-type": "application/json",
-      "Authorization": `Bearer ${config.OPENROUTER_API_KEY}`,
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${settings.openRouterApiKey}`,
     },
     body: JSON.stringify({
-      model: config.COPY_MODEL || "deepseek/deepseek-chat",
+      model: settings.copyModel || "deepseek/deepseek-chat",
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: prompt },
+        { role: "user", content: userPrompt },
       ],
       response_format: { type: "json_object" },
     }),
@@ -180,7 +183,8 @@ export async function generateCopy(
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       let rawText: string;
-      if (config.OPENROUTER_API_KEY) {
+      const settings = getSettings();
+      if (settings.openRouterApiKey) {
         rawText = await callOpenRouter(systemPrompt, finalPrompt, timeoutMs);
       } else {
         try {
@@ -248,7 +252,7 @@ export async function enhanceImagePrompt(prompt: string, timeoutMs = 15_000): Pr
 
   try {
     let rawText: string;
-    if (config.OPENROUTER_API_KEY) {
+    if (settings.openRouterApiKey) {
       rawText = await callOpenRouter(systemPrompt, prompt, timeoutMs);
     } else {
       try {
@@ -309,7 +313,8 @@ Example output: {"text": null, "style": null}`;
 
   try {
     let rawText: string;
-    if (config.OPENROUTER_API_KEY) {
+    const settings = getSettings();
+    if (settings.openRouterApiKey) {
       rawText = await callOpenRouter(systemPrompt, prompt, timeoutMs);
     } else {
       try {

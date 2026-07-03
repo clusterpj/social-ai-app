@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Social Bot Admin</title>
+    <title>Social Bot Command Center</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -25,21 +25,15 @@
             margin: 0;
             display: flex;
             justify-content: center;
-            align-items: center;
+            align-items: flex-start;
             padding: 2rem;
             box-sizing: border-box;
+            overflow-y: auto;
         }
 
         .container {
             width: 100%;
-            max-width: 800px;
-            background: var(--glass-bg);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid var(--glass-border);
-            border-radius: 24px;
-            padding: 2.5rem;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            max-width: 900px;
             animation: fadeUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
@@ -48,8 +42,13 @@
             to { opacity: 1; transform: translateY(0); }
         }
 
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
         h1 {
-            font-size: 2rem;
+            font-size: 2.5rem;
             font-weight: 700;
             margin: 0 0 0.5rem 0;
             background: linear-gradient(to right, #60a5fa, #c084fc);
@@ -59,7 +58,32 @@
 
         p.subtitle {
             color: var(--text-muted);
+            font-size: 1.1rem;
+        }
+
+        .section-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 2rem;
             margin-bottom: 2rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .section-card h2 {
+            font-size: 1.25rem;
+            margin: 0 0 1.5rem 0;
+            color: #fff;
+            border-bottom: 1px solid var(--glass-border);
+            padding-bottom: 0.75rem;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
         }
 
         .form-group {
@@ -74,7 +98,7 @@
             color: var(--text-muted);
         }
 
-        input[type="text"], textarea {
+        input[type="text"], input[type="password"], textarea {
             width: 100%;
             background: var(--input-bg);
             border: 1px solid var(--glass-border);
@@ -87,7 +111,7 @@
             transition: all 0.2s ease;
         }
 
-        input[type="text"]:focus, textarea:focus {
+        input[type="text"]:focus, input[type="password"]:focus, textarea:focus {
             outline: none;
             border-color: var(--accent);
             box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
@@ -95,7 +119,7 @@
 
         textarea {
             resize: vertical;
-            min-height: 250px;
+            min-height: 150px;
         }
 
         .range-container {
@@ -120,24 +144,34 @@
             border: 1px solid var(--glass-border);
         }
 
+        .button-container {
+            position: sticky;
+            bottom: 2rem;
+            z-index: 100;
+            display: flex;
+            justify-content: center;
+            margin-top: 3rem;
+        }
+
         button {
             width: 100%;
+            max-width: 400px;
             background: var(--accent);
             color: white;
             border: none;
-            padding: 1rem;
-            font-size: 1rem;
+            padding: 1.25rem;
+            font-size: 1.1rem;
             font-weight: 600;
-            border-radius: 12px;
+            border-radius: 16px;
             cursor: pointer;
             transition: all 0.2s ease;
-            margin-top: 1rem;
+            box-shadow: 0 10px 25px -5px rgba(37, 99, 235, 0.5);
         }
 
         button:hover {
             background: var(--accent-hover);
             transform: translateY(-2px);
-            box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
+            box-shadow: 0 15px 30px -5px rgba(37, 99, 235, 0.6);
         }
         
         button:disabled {
@@ -148,7 +182,7 @@
 
         .toast {
             position: fixed;
-            bottom: 2rem;
+            top: 2rem;
             right: 2rem;
             background: #10b981;
             color: white;
@@ -156,9 +190,10 @@
             border-radius: 12px;
             font-weight: 500;
             box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.3);
-            transform: translateY(100px);
+            transform: translateY(-100px);
             opacity: 0;
             transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            z-index: 1000;
         }
 
         .toast.show {
@@ -170,41 +205,94 @@
 <body>
 
     <div class="container">
-        <h1>Command Center</h1>
-        <p class="subtitle">Manage AI configuration and access controls</p>
+        <header>
+            <h1>Command Center</h1>
+            <p class="subtitle">Complete system configuration and integrations</p>
+        </header>
 
         <form id="settings-form">
-            <div class="form-group">
-                <label for="allowedChatIds">Allowed Telegram Chat IDs (comma separated)</label>
-                <input type="text" id="allowedChatIds" required placeholder="e.g. 123456789,987654321">
-            </div>
-
-            <div class="form-group">
-                <label for="copySystemPrompt">AI Copywriter System Prompt</label>
-                <textarea id="copySystemPrompt" required></textarea>
-            </div>
-
-            <div class="form-group">
-                <label>AI Image Detail Level (Inference Steps)</label>
-                <div class="range-container">
-                    <input type="range" id="fluxInferenceSteps" min="20" max="50" step="1" oninput="updateRange('fluxInferenceSteps')">
-                    <span class="range-value" id="fluxInferenceSteps-val">35</span>
+            <!-- Access Controls -->
+            <div class="section-card">
+                <h2>1. Access & General Settings</h2>
+                <div class="form-group">
+                    <label for="allowedChatIds">Allowed Telegram Chat IDs (comma separated)</label>
+                    <input type="text" id="allowedChatIds" required placeholder="e.g. 123456789,987654321">
                 </div>
             </div>
 
-            <div class="form-group">
-                <label>AI Prompt Adherence (Guidance Scale)</label>
-                <div class="range-container">
-                    <input type="range" id="fluxGuidanceScale" min="1.0" max="10.0" step="0.1" oninput="updateRange('fluxGuidanceScale')">
-                    <span class="range-value" id="fluxGuidanceScale-val">3.5</span>
+            <!-- AI Settings -->
+            <div class="section-card">
+                <h2>2. AI Behavior & Quality</h2>
+                
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label for="copyModel">Copywriter LLM Model</label>
+                        <input type="text" id="copyModel" placeholder="e.g. deepseek/deepseek-chat">
+                    </div>
+                    <div class="form-group">
+                        <label for="fluxModel">Image Generator Model</label>
+                        <input type="text" id="fluxModel" placeholder="e.g. fal-ai/flux/dev">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="copySystemPrompt">Copywriter System Prompt (Master Instructions)</label>
+                    <textarea id="copySystemPrompt" required></textarea>
+                </div>
+
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Image Detail Level (Inference Steps)</label>
+                        <div class="range-container">
+                            <input type="range" id="fluxInferenceSteps" min="20" max="50" step="1" oninput="updateRange('fluxInferenceSteps')">
+                            <span class="range-value" id="fluxInferenceSteps-val">35</span>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Prompt Adherence (Guidance Scale)</label>
+                        <div class="range-container">
+                            <input type="range" id="fluxGuidanceScale" min="1.0" max="10.0" step="0.1" oninput="updateRange('fluxGuidanceScale')">
+                            <span class="range-value" id="fluxGuidanceScale-val">3.5</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <button type="submit" id="save-btn">Save Configuration</button>
+            <!-- API Integrations -->
+            <div class="section-card">
+                <h2>3. API Integrations (Secret Keys)</h2>
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label for="openRouterApiKey">OpenRouter API Key (Primary LLM)</label>
+                        <input type="password" id="openRouterApiKey" placeholder="sk-or-v1-...">
+                    </div>
+                    <div class="form-group">
+                        <label for="falKey">Fal.ai Key (Flux Image Gen)</label>
+                        <input type="password" id="falKey" placeholder="key:secret">
+                    </div>
+                    <div class="form-group">
+                        <label for="anthropicApiKey">Anthropic API Key (Fallback)</label>
+                        <input type="password" id="anthropicApiKey" placeholder="sk-ant-...">
+                    </div>
+                    <div class="form-group">
+                        <label for="deepseekApiKey">DeepSeek API Key (Fallback)</label>
+                        <input type="password" id="deepseekApiKey" placeholder="sk-...">
+                    </div>
+                    <div class="form-group">
+                        <label for="zernioApiKey">Zernio API Key (Publisher)</label>
+                        <input type="password" id="zernioApiKey" placeholder="sk_...">
+                    </div>
+                </div>
+            </div>
+
+            <div class="button-container">
+                <button type="submit" id="save-btn">Deploy Configuration Safely</button>
+            </div>
         </form>
     </div>
 
-    <div class="toast" id="toast">Settings saved successfully!</div>
+    <div class="toast" id="toast">Settings deployed to production successfully!</div>
 
     <script>
         function updateRange(id) {
@@ -217,8 +305,16 @@
                 if (!res.ok) throw new Error('Unauthorized');
                 const data = await res.json();
                 
-                document.getElementById('allowedChatIds').value = data.allowedChatIds;
-                document.getElementById('copySystemPrompt').value = data.copySystemPrompt;
+                const fields = [
+                    'allowedChatIds', 'copySystemPrompt', 'copyModel', 'fluxModel',
+                    'openRouterApiKey', 'anthropicApiKey', 'deepseekApiKey', 'falKey', 'zernioApiKey'
+                ];
+                
+                fields.forEach(f => {
+                    if(document.getElementById(f)) {
+                        document.getElementById(f).value = data[f] || '';
+                    }
+                });
                 
                 document.getElementById('fluxInferenceSteps').value = data.fluxInferenceSteps;
                 updateRange('fluxInferenceSteps');
@@ -237,11 +333,18 @@
             e.preventDefault();
             const btn = document.getElementById('save-btn');
             btn.disabled = true;
-            btn.textContent = 'Saving...';
+            btn.textContent = 'Deploying...';
 
             const payload = {
                 allowedChatIds: document.getElementById('allowedChatIds').value,
                 copySystemPrompt: document.getElementById('copySystemPrompt').value,
+                copyModel: document.getElementById('copyModel').value,
+                fluxModel: document.getElementById('fluxModel').value,
+                openRouterApiKey: document.getElementById('openRouterApiKey').value,
+                anthropicApiKey: document.getElementById('anthropicApiKey').value,
+                deepseekApiKey: document.getElementById('deepseekApiKey').value,
+                falKey: document.getElementById('falKey').value,
+                zernioApiKey: document.getElementById('zernioApiKey').value,
                 fluxInferenceSteps: parseInt(document.getElementById('fluxInferenceSteps').value),
                 fluxGuidanceScale: parseFloat(document.getElementById('fluxGuidanceScale').value),
             };
@@ -261,7 +364,7 @@
                 alert("Failed to save settings.");
             } finally {
                 btn.disabled = false;
-                btn.textContent = 'Save Configuration';
+                btn.textContent = 'Deploy Configuration Safely';
             }
         });
 

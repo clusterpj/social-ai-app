@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { config } from "../../config";
 import { log } from "../../log";
+import { getSettings } from "../../db";
 import type {
   PublishAdapter,
   PublishResult,
@@ -57,13 +58,18 @@ async function zernioFetch(
   retries = 1,
   timeoutMs = 30_000,
 ): Promise<Response> {
+  const settings = getSettings();
+  if (!settings.zernioApiKey) {
+    throw new Error("ZERNIO_API_KEY is not configured");
+  }
+
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const res = await fetch(`${BASE_URL}${path}`, {
         ...init,
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${config.ZERNIO_API_KEY}`,
+          authorization: `Bearer ${settings.zernioApiKey}`,
           ...init.headers,
         },
         signal: AbortSignal.timeout(timeoutMs),

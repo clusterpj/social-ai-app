@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { z } from "zod";
 import { PLATFORMS, type Platform } from "./services/publisher/types";
 import { log } from "./log";
+import { config } from "./config";
 
 const MIGRATIONS: readonly string[] = [
   // v1 — initial schema
@@ -293,11 +294,16 @@ export interface AppSettings {
   fluxInferenceSteps: number;
   fluxGuidanceScale: number;
   copySystemPrompt: string;
+  openRouterApiKey: string;
+  anthropicApiKey: string;
+  deepseekApiKey: string;
+  falKey: string;
+  zernioApiKey: string;
+  copyModel: string;
+  fluxModel: string;
 }
 
-const defaultSettings: AppSettings = {
-  // We grab initial defaults from config and hardcoded values
-  allowedChatIds: "", // We will populate this from getSettings if not set
+const defaultSettings = {
   fluxInferenceSteps: 35,
   fluxGuidanceScale: 3.5,
   copySystemPrompt: `You are a prompt engineer for an AI image generator (Flux).
@@ -316,14 +322,18 @@ export function getSettings(): AppSettings {
   const rows = db.query<{ key: string; value: string }, []>("SELECT key, value FROM settings").all();
   const map = new Map(rows.map(r => [r.key, r.value]));
   
-  // For allowedChatIds, if not in DB, we fall back to process.env.ALLOWED_CHAT_IDS
-  const fallbackChatIds = process.env.ALLOWED_CHAT_IDS || "";
-  
   return {
-    allowedChatIds: map.get("allowedChatIds") ?? fallbackChatIds,
+    allowedChatIds: map.get("allowedChatIds") ?? config.ALLOWED_CHAT_IDS.join(","),
     fluxInferenceSteps: map.has("fluxInferenceSteps") ? Number(map.get("fluxInferenceSteps")) : defaultSettings.fluxInferenceSteps,
     fluxGuidanceScale: map.has("fluxGuidanceScale") ? Number(map.get("fluxGuidanceScale")) : defaultSettings.fluxGuidanceScale,
     copySystemPrompt: map.get("copySystemPrompt") ?? defaultSettings.copySystemPrompt,
+    openRouterApiKey: map.get("openRouterApiKey") ?? config.OPENROUTER_API_KEY,
+    anthropicApiKey: map.get("anthropicApiKey") ?? config.ANTHROPIC_API_KEY,
+    deepseekApiKey: map.get("deepseekApiKey") ?? config.DEEPSEEK_API_KEY,
+    falKey: map.get("falKey") ?? config.FAL_KEY,
+    zernioApiKey: map.get("zernioApiKey") ?? config.ZERNIO_API_KEY,
+    copyModel: map.get("copyModel") ?? config.COPY_MODEL,
+    fluxModel: map.get("fluxModel") ?? config.FLUX_MODEL,
   };
 }
 
@@ -334,6 +344,13 @@ export function updateSettings(settings: Partial<AppSettings>): void {
     if (settings.fluxInferenceSteps !== undefined) update.run("fluxInferenceSteps", String(settings.fluxInferenceSteps));
     if (settings.fluxGuidanceScale !== undefined) update.run("fluxGuidanceScale", String(settings.fluxGuidanceScale));
     if (settings.copySystemPrompt !== undefined) update.run("copySystemPrompt", settings.copySystemPrompt);
+    if (settings.openRouterApiKey !== undefined) update.run("openRouterApiKey", settings.openRouterApiKey);
+    if (settings.anthropicApiKey !== undefined) update.run("anthropicApiKey", settings.anthropicApiKey);
+    if (settings.deepseekApiKey !== undefined) update.run("deepseekApiKey", settings.deepseekApiKey);
+    if (settings.falKey !== undefined) update.run("falKey", settings.falKey);
+    if (settings.zernioApiKey !== undefined) update.run("zernioApiKey", settings.zernioApiKey);
+    if (settings.copyModel !== undefined) update.run("copyModel", settings.copyModel);
+    if (settings.fluxModel !== undefined) update.run("fluxModel", settings.fluxModel);
   })();
 }
 
