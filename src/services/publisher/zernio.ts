@@ -90,44 +90,17 @@ async function zernioFetch(
  */
 export const zernioAdapter: PublishAdapter = {
   async publish(input): Promise<PublishResult> {
-    const { accountIds, content, mediaUrls } = input;
+    const { accounts, content, mediaUrls } = input;
 
-    // Build per-platform entries for the Zernio platforms array.
-    // Each accountId maps 1:1 to an entry; copy comes from `content` keyed by platform name.
-    // We need to resolve accountId → platform, but in our data model the tenant record
-    // stores both accountIds and platforms arrays in parallel, so the caller already has them.
-    // We'll pass customContent for each platform entry.
-    const platforms: Array<{
-      platform: string;
-      accountId: string;
-      customContent?: string;
-    }> = accountIds.map((id) => ({ platform: "", accountId: id }));
-
-    // The content record keys are platform names → copy. We assign customContent per accountId.
-    // Since the plan stores accountIds + platforms in parallel arrays, we resolve by matching.
-    // For now, use a single `content` field (Zernio supports a top-level `content` that applies
-    // to all platforms that lack customContent) and set customContent on each entry.
     const platformEntries: Array<{
       platform: string;
       accountId: string;
       customContent?: string;
-    }> = [];
-
-    // content is Record<platform, copy>. We need to match these to accountIds.
-    // The tenant's accountIds and platforms arrays are parallel — but at this adapter level
-    // we just receive accountIds. We'll set platform in the Zernio payload from the content keys.
-    const platformNames = Object.keys(content) as Platform[];
-    for (let i = 0; i < accountIds.length; i++) {
-      const accountId = accountIds[i];
-      // Match accountId positionally to platform name (parallel arrays from tenant record)
-      const platformName = platformNames[i];
-      if (accountId === undefined) continue;
-      platformEntries.push({
-        platform: platformName ?? "unknown",
-        accountId,
-        customContent: platformName ? content[platformName] : undefined,
-      });
-    }
+    }> = accounts.map((acc) => ({
+      platform: acc.platform,
+      accountId: acc.id,
+      customContent: content[acc.platform],
+    }));
 
     const body: Record<string, unknown> = {
       publishNow: true,

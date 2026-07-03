@@ -21,7 +21,7 @@ export type PublishResult =
 
 export interface PublishAdapter {
   publish(input: {
-    accountIds: string[];
+    accounts: Array<{ id: string; platform: Platform }>;
     content: Record<string, string>; // platform → copy
     mediaUrls: string[];
   }): Promise<PublishResult>;

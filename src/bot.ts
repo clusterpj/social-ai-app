@@ -49,6 +49,9 @@ bot.on("message:text", async (ctx, next) => {
   }
 
   const draftId = match[1];
+  if (!draftId) {
+    return next();
+  }
   const tweakInstruction = ctx.message.text;
 
   // We can just reuse handleRegenerateCopy, but we need to pass the tweak.

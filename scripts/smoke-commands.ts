@@ -8,6 +8,9 @@
  */
 import { bot } from "../src/bot";
 import { db } from "../src/db";
+import { config } from "../src/config";
+
+const ALLOWED_ID = config.ALLOWED_CHAT_IDS[0]!;
 
 // Mock botInfo eagerly so handling updates does not invoke bot.init() API call
 bot.botInfo = {
@@ -23,7 +26,8 @@ bot.botInfo = {
   can_manage_bots: false,
   has_topics_enabled: false,
   allows_users_to_create_topics: false,
-};
+  supports_join_request_queries: false,
+} as any;
 
 // Store intercepted API calls for assertion
 const apiCalls: Array<{ method: string; payload: any }> = [];
@@ -60,8 +64,8 @@ const helpCalls = await simulateUpdate({
   update_id: 10001,
   message: {
     message_id: 101,
-    from: { id: 123456789, is_bot: false, first_name: "Pedro" },
-    chat: { id: 123456789, type: "private", first_name: "Pedro" },
+    from: { id: ALLOWED_ID, is_bot: false, first_name: "Pedro" },
+    chat: { id: ALLOWED_ID, type: "private", first_name: "Pedro" },
     date: Math.floor(Date.now() / 1000),
     text: "/help",
     entities: [{ offset: 0, length: 5, type: "bot_command" }],
@@ -70,7 +74,7 @@ const helpCalls = await simulateUpdate({
 
 const helpPassed = helpCalls.length === 1 && 
   helpCalls[0]!.method === "sendMessage" && 
-  helpCalls[0]!.payload.chat_id === 123456789 &&
+  helpCalls[0]!.payload.chat_id === ALLOWED_ID &&
   helpCalls[0]!.payload.text.includes("Social Command Center");
 
 console.log(helpPassed ? "✅ /help passed" : `❌ /help failed. Calls: ${JSON.stringify(helpCalls, null, 2)}`);
@@ -81,8 +85,8 @@ const statusCalls = await simulateUpdate({
   update_id: 10002,
   message: {
     message_id: 102,
-    from: { id: 123456789, is_bot: false, first_name: "Pedro" },
-    chat: { id: 123456789, type: "private", first_name: "Pedro" },
+    from: { id: ALLOWED_ID, is_bot: false, first_name: "Pedro" },
+    chat: { id: ALLOWED_ID, type: "private", first_name: "Pedro" },
     date: Math.floor(Date.now() / 1000),
     text: "/status",
     entities: [{ offset: 0, length: 7, type: "bot_command" }],
@@ -91,7 +95,7 @@ const statusCalls = await simulateUpdate({
 
 const statusPassed = statusCalls.length === 1 &&
   statusCalls[0]!.method === "sendMessage" &&
-  statusCalls[0]!.payload.chat_id === 123456789 &&
+  statusCalls[0]!.payload.chat_id === ALLOWED_ID &&
   statusCalls[0]!.payload.text.includes("Estado / Status");
 
 console.log(statusPassed ? "✅ /status passed" : `❌ /status failed. Calls: ${JSON.stringify(statusCalls, null, 2)}`);
@@ -120,15 +124,15 @@ console.log(blockedPassed ? "✅ Allowlist block passed" : "❌ Allowlist block 
 console.log("\nTesting /status with configured tenant in DB...");
 db.run(
   "INSERT OR REPLACE INTO tenants (chat_id, name, account_ids, platforms, created_at) VALUES (?, ?, ?, ?, ?)",
-  [123456789, "Pedro's Hub", JSON.stringify(["acc1", "acc2"]), JSON.stringify(["instagram", "linkedin"]), Date.now()]
+  [ALLOWED_ID, "Pedro's Hub", JSON.stringify(["acc1", "acc2"]), JSON.stringify(["instagram", "linkedin"]), Date.now()]
 );
 
 const statusTenantCalls = await simulateUpdate({
   update_id: 10004,
   message: {
     message_id: 104,
-    from: { id: 123456789, is_bot: false, first_name: "Pedro" },
-    chat: { id: 123456789, type: "private", first_name: "Pedro" },
+    from: { id: ALLOWED_ID, is_bot: false, first_name: "Pedro" },
+    chat: { id: ALLOWED_ID, type: "private", first_name: "Pedro" },
     date: Math.floor(Date.now() / 1000),
     text: "/status",
     entities: [{ offset: 0, length: 7, type: "bot_command" }],
@@ -137,14 +141,14 @@ const statusTenantCalls = await simulateUpdate({
 
 const statusTenantPassed = statusTenantCalls.length === 1 &&
   statusTenantCalls[0]!.method === "sendMessage" &&
-  statusTenantCalls[0]!.payload.chat_id === 123456789 &&
+  statusTenantCalls[0]!.payload.chat_id === ALLOWED_ID &&
   statusTenantCalls[0]!.payload.text.includes("Pedro's Hub") &&
   statusTenantCalls[0]!.payload.text.includes("instagram, linkedin");
 
 console.log(statusTenantPassed ? "✅ /status with tenant passed" : `❌ /status with tenant failed. Calls: ${JSON.stringify(statusTenantCalls, null, 2)}`);
 
 // Clean up the test tenant so we don't leave side-effects
-db.run("DELETE FROM tenants WHERE chat_id = ?", [123456789]);
+db.run("DELETE FROM tenants WHERE chat_id = ?", [ALLOWED_ID]);
 
 // Clean up DB handle so script exits cleanly
 db.close();

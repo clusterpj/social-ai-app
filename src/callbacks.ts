@@ -82,7 +82,10 @@ async function handlePublish(ctx: Context, draftId: string): Promise<void> {
       : [];
 
     const result = await zernioAdapter.publish({
-      accountIds: tenant.accountIds,
+      accounts: tenant.accountIds.map((id, i) => ({
+        id,
+        platform: tenant.platforms[i]!,
+      })),
       content: copyJson,
       mediaUrls,
     });

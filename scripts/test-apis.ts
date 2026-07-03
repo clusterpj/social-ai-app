@@ -1,4 +1,5 @@
 import { bot } from "../src/bot";
+import { config } from "../src/config";
 import { generateCopy } from "../src/services/copy";
 import { generateImage } from "../src/services/image";
 import { zernioAdapter } from "../src/services/publisher/zernio";
@@ -16,10 +17,17 @@ async function run() {
     console.error(err instanceof Error ? err.message : err);
   }
 
-  // 2. Anthropic
+  // 2. LLM Copy Generation
   try {
-    process.stdout.write("Anthropic (Copy)..... ");
-    const copy = await generateCopy("Say hello world in 3 words", ["x"], 0, 10000);
+    const provider = config.OPENROUTER_API_KEY 
+      ? "OpenRouter" 
+      : config.ANTHROPIC_API_KEY 
+        ? "Anthropic" 
+        : config.DEEPSEEK_API_KEY 
+          ? "DeepSeek" 
+          : "None";
+    process.stdout.write(`LLM Copy (${provider}).... `);
+    const copy = await generateCopy("Say hello world in 3 words", ["x"], undefined, 0, 10000);
     console.log(`✅ OK (Generated: "${copy.x}")`);
   } catch (err) {
     console.log(`❌ FAILED`);

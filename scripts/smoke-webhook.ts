@@ -21,7 +21,8 @@ const bot = new Bot("123456:dummy", {
     can_manage_bots: false,
     has_topics_enabled: false,
     allows_users_to_create_topics: false,
-  },
+    supports_join_request_queries: false,
+  } as any,
 });
 const handle = webhookCallback(bot, "bun", { secretToken: SECRET });
 
