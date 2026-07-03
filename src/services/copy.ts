@@ -19,7 +19,8 @@ function buildSystemPrompt(platforms: readonly Platform[]): string {
     "You are a professional social-media copywriter.",
     "Given a user's caption/idea, produce optimised copy for each requested platform.",
     "Output ONLY a JSON object — no markdown fences, no explanation.",
-    "Keys: the platform names provided below. Values: the copy string.",
+    `The keys in the returned JSON object MUST be exactly from this list (in lowercase): ${platforms.map(p => `"${p}"`).join(", ")}.`,
+    "For example, if generating copy for X/Twitter and LinkedIn, the JSON keys must be exactly \"x\" and \"linkedin\". Do not use \"X (Twitter)\" or \"LinkedIn\" as keys.",
     "",
     "Per-platform rules:",
   ];
@@ -119,6 +120,41 @@ async function callDeepseek(systemPrompt: string, prompt: string, timeoutMs: num
   return content;
 }
 
+async function callOpenRouter(systemPrompt: string, prompt: string, timeoutMs: number): Promise<string> {
+  if (!config.OPENROUTER_API_KEY) {
+    throw new Error("OPENROUTER_API_KEY is not configured");
+  }
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "Authorization": `Bearer ${config.OPENROUTER_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: config.COPY_MODEL || "deepseek/deepseek-chat",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: prompt },
+      ],
+      response_format: { type: "json_object" },
+    }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`OpenRouter API ${res.status}: ${body.slice(0, 200)}`);
+  }
+
+  const json = await res.json() as any;
+  const content = json.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error("No text content in OpenRouter response");
+  }
+
+  return content;
+}
+
 /**
  * Call Claude Haiku (or DeepSeek as fallback) to generate per-platform copy from the user's prompt.
  *
@@ -143,13 +179,17 @@ export async function generateCopy(
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       let rawText: string;
-      try {
-        rawText = await callAnthropic(systemPrompt, finalPrompt, timeoutMs);
-      } catch (anthropicErr) {
-        log("warn", "anthropic_failed_fallback_deepseek", {
-          error: anthropicErr instanceof Error ? anthropicErr.message : String(anthropicErr),
-        });
-        rawText = await callDeepseek(systemPrompt, finalPrompt, timeoutMs);
+      if (config.OPENROUTER_API_KEY) {
+        rawText = await callOpenRouter(systemPrompt, finalPrompt, timeoutMs);
+      } else {
+        try {
+          rawText = await callAnthropic(systemPrompt, finalPrompt, timeoutMs);
+        } catch (anthropicErr) {
+          log("warn", "anthropic_failed_fallback_deepseek", {
+            error: anthropicErr instanceof Error ? anthropicErr.message : String(anthropicErr),
+          });
+          rawText = await callDeepseek(systemPrompt, finalPrompt, timeoutMs);
+        }
       }
 
       // Parse the JSON output — strip possible markdown fences
@@ -196,4 +236,52 @@ export async function generateCopy(
 
   // Unreachable, but satisfies TypeScript
   throw new Error("generateCopy: exhausted retries");
+}
+
+/**
+ * Enhance the user's raw prompt for the image generator.
+ */
+export async function enhanceImagePrompt(prompt: string, timeoutMs = 15_000): Promise<string> {
+  const systemPrompt = `You are a prompt engineer for an AI image generator (Flux).
+Your job is to rewrite the user's simple idea into a highly detailed visual prompt.
+CRITICAL RULES for TEXT:
+1. If the user wants specific promotional text on the image (e.g., "30% discount"), extract the main punchline (e.g., "30% OFF") and put it inside quotes in your prompt.
+2. Explicitly instruct the AI NOT to generate any fine print, disclaimers, or small text.
+3. Keep the requested text extremely short (1-5 words).
+Example output prompt: "A high quality photo of a tire shop showroom, bold massive typography in the center saying '30% OFF', clean composition, no extra text, no small text, no fine print."
+
+Output ONLY a JSON object with a single key "prompt".`;
+
+  try {
+    let rawText: string;
+    if (config.OPENROUTER_API_KEY) {
+      rawText = await callOpenRouter(systemPrompt, prompt, timeoutMs);
+    } else {
+      try {
+        rawText = await callAnthropic(systemPrompt, prompt, timeoutMs);
+      } catch (anthropicErr) {
+        log("warn", "anthropic_enhance_failed_fallback", {
+          error: anthropicErr instanceof Error ? anthropicErr.message : String(anthropicErr),
+        });
+        rawText = await callDeepseek(systemPrompt, prompt, timeoutMs);
+      }
+    }
+
+    const raw = rawText
+      .replace(/^```json?\s*/i, "")
+      .replace(/```\s*$/, "")
+      .trim();
+
+    const parsed = JSON.parse(raw);
+    if (!parsed.prompt || typeof parsed.prompt !== "string") {
+      throw new Error("LLM did not return a valid prompt string");
+    }
+
+    log("info", "prompt_enhanced", { original: prompt, enhanced: parsed.prompt });
+    return parsed.prompt;
+  } catch (err) {
+    log("error", "enhance_prompt_failed", { error: err instanceof Error ? err.message : String(err) });
+    // Fallback to original prompt with hardcoded constraints
+    return `${prompt}, bold typography if any text, clean composition, NO fine print, NO small text, NO disclaimers`;
+  }
 }

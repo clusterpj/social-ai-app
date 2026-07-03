@@ -4,6 +4,7 @@ import { log } from "../log";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { downloadToMedia, newMediaFilename } from "../media";
+import { enhanceImagePrompt } from "./copy";
 
 // Set the API key explicitly so we don't rely on global environment variable side effects
 fal.config({
@@ -25,6 +26,8 @@ export async function generateImage(
   
   log("info", "image_generation_started", { prompt_len: prompt.length });
 
+  const enhancedPrompt = await enhanceImagePrompt(prompt, Math.min(timeoutMs, 15_000));
+
   // Fallback for local development if FAL_KEY is not set
   if (!config.FAL_KEY || config.FAL_KEY === "stub") {
     let usedComfyUI = false;
@@ -41,7 +44,7 @@ export async function generateImage(
           
           // Inject prompt into node "6" (CLIPTextEncode)
           if (workflow["6"] && workflow["6"].inputs) {
-            workflow["6"].inputs.text = prompt;
+            workflow["6"].inputs.text = enhancedPrompt;
           }
 
           // Randomize seed
@@ -101,7 +104,7 @@ export async function generateImage(
   // We'll wrap it in a timeout locally just in case.
   const fetchTask = fal.subscribe(config.FLUX_MODEL, {
     input: {
-      prompt,
+      prompt: enhancedPrompt,
       image_size: "landscape_4_3",
       num_inference_steps: 28, // Good default for quality
       guidance_scale: 3.5,     // Good default for Flux

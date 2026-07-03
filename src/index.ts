@@ -7,7 +7,7 @@ import { cleanupOldMedia } from "./media";
 
 const startedAt = Date.now();
 
-const isLocal = config.PUBLIC_BASE_URL.includes("localhost");
+const isLocal = config.PUBLIC_BASE_URL.includes("localhost") || config.PUBLIC_BASE_URL.includes("104.248.121.22");
 
 const handleUpdate = isLocal ? null : webhookCallback(bot, "bun", {
   secretToken: config.TELEGRAM_WEBHOOK_SECRET,
