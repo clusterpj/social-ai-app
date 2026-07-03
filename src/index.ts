@@ -109,12 +109,11 @@ bot.init().then(
     // If we're running locally, Telegram can't reach our webhook. Switch to polling!
     if (isLocal) {
       log("info", "local_dev_mode", { polling: true });
-      // Temporarily commented out for local UI testing to prevent 409 conflict
-      // bot.api.deleteWebhook().then(() => {
-      //   bot.start({
-      //     onStart: (botInfo) => log("info", "bot_polling_started", { username: botInfo.username }),
-      //   });
-      // });
+      bot.api.deleteWebhook().then(() => {
+        bot.start({
+          onStart: (botInfo) => log("info", "bot_polling_started", { username: botInfo.username }),
+        });
+      });
     }
   },
   (err: unknown) => log("warn", "bot_init_failed", errorFields(err)),
