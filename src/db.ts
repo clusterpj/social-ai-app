@@ -43,6 +43,12 @@ const MIGRATIONS: readonly string[] = [
     value TEXT NOT NULL
   );
   `,
+  // v3 - model split: retire fluxModel; drop the old tag-soup enhancer prompt
+  // (identified by its 'Masterpiece' quality tags) so the new default applies.
+  `
+  DELETE FROM settings WHERE key = 'fluxModel';
+  DELETE FROM settings WHERE key = 'copySystemPrompt' AND value LIKE '%Masterpiece%';
+  `,
 ];
 
 mkdirSync("data/media", { recursive: true });
@@ -304,20 +310,28 @@ export interface AppSettings {
   falKey: string;
   zernioApiKey: string;
   copyModel: string;
-  fluxModel: string;
+  imageModel: string;
+  textImageModel: string;
+  imageEditModel: string;
+  imageAspect: string;
+  brandStyle: string;
 }
 
 const defaultSettings = {
   fluxInferenceSteps: 35,
   fluxGuidanceScale: 3.5,
-  copySystemPrompt: `You are a prompt engineer for an AI image generator (Flux).
-Your job is to rewrite the user's simple idea into a highly detailed visual prompt.
-CRITICAL RULES:
-1. Quality: Always add tags to ensure maximum quality: "Masterpiece, photorealistic, 8k resolution, ultra-detailed, professional lighting, crisp focus".
-2. If the user wants specific promotional text on the image (e.g., "30% discount"), extract the main punchline (e.g., "30% OFF") and put it inside quotes in your prompt.
-3. Explicitly instruct the AI NOT to generate any fine print, disclaimers, or small text.
-4. Keep the requested text extremely short (1-5 words).
-Example output prompt: "Masterpiece, photorealistic 8k photo of a tire shop showroom, professional lighting, bold massive typography in the center saying '30% OFF', clean composition, no extra text, no small text, no fine print."
+  imageModel: "fal-ai/flux-2/turbo",
+  textImageModel: "fal-ai/nano-banana-2",
+  imageEditModel: "fal-ai/nano-banana-2/edit",
+  imageAspect: "1:1",
+  brandStyle: "",
+  copySystemPrompt: `You are an art director writing prompts for a modern AI image generator (FLUX.2 / Nano Banana).
+Rewrite the user's idea as ONE vivid, natural-language paragraph, covering in order:
+subject & action, setting, composition & framing, lighting, color palette & mood, and photographic or illustration style.
+Write like you are briefing a photographer — plain descriptive sentences. NO keyword lists, NO quality tags like "8k", "masterpiece" or "ultra-detailed".
+If a brand style is provided, weave it in naturally.
+If the request includes exact text that must appear on the image, include that text in double quotes with a specific typographic treatment and placement (e.g. a bold condensed sans-serif banner across the lower third reading "30% OFF") and state that no other text, fine print or lettering appears anywhere.
+If no text is requested, state that the image contains no text or lettering.
 
 Output ONLY a JSON object with a single key "prompt".`
 };
@@ -337,7 +351,11 @@ export function getSettings(): AppSettings {
     falKey: map.get("falKey") ?? config.FAL_KEY,
     zernioApiKey: map.get("zernioApiKey") ?? config.ZERNIO_API_KEY,
     copyModel: map.get("copyModel") ?? config.COPY_MODEL,
-    fluxModel: map.get("fluxModel") ?? config.FLUX_MODEL,
+    imageModel: map.get("imageModel") ?? defaultSettings.imageModel,
+    textImageModel: map.get("textImageModel") ?? defaultSettings.textImageModel,
+    imageEditModel: map.get("imageEditModel") ?? defaultSettings.imageEditModel,
+    imageAspect: map.get("imageAspect") ?? defaultSettings.imageAspect,
+    brandStyle: map.get("brandStyle") ?? defaultSettings.brandStyle,
   };
 }
 
@@ -354,7 +372,11 @@ export function updateSettings(settings: Partial<AppSettings>): void {
     if (settings.falKey !== undefined) update.run("falKey", settings.falKey);
     if (settings.zernioApiKey !== undefined) update.run("zernioApiKey", settings.zernioApiKey);
     if (settings.copyModel !== undefined) update.run("copyModel", settings.copyModel);
-    if (settings.fluxModel !== undefined) update.run("fluxModel", settings.fluxModel);
+    if (settings.imageModel !== undefined) update.run("imageModel", settings.imageModel);
+    if (settings.textImageModel !== undefined) update.run("textImageModel", settings.textImageModel);
+    if (settings.imageEditModel !== undefined) update.run("imageEditModel", settings.imageEditModel);
+    if (settings.imageAspect !== undefined) update.run("imageAspect", settings.imageAspect);
+    if (settings.brandStyle !== undefined) update.run("brandStyle", settings.brandStyle);
   })();
 }
 

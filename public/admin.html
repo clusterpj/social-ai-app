@@ -98,7 +98,7 @@
             color: var(--text-muted);
         }
 
-        input[type="text"], input[type="password"], textarea {
+        input[type="text"], input[type="password"], textarea, select {
             width: 100%;
             background: var(--input-bg);
             border: 1px solid var(--glass-border);
@@ -230,13 +230,36 @@
                         <input type="text" id="copyModel" placeholder="e.g. deepseek/deepseek-chat">
                     </div>
                     <div class="form-group">
-                        <label for="fluxModel">Image Generator Model</label>
-                        <input type="text" id="fluxModel" placeholder="e.g. fal-ai/flux/dev">
+                        <label for="imageModel">Image Model (no text on image)</label>
+                        <input type="text" id="imageModel" placeholder="e.g. fal-ai/flux-2/turbo">
+                    </div>
+                    <div class="form-group">
+                        <label for="textImageModel">Image Model (text on image)</label>
+                        <input type="text" id="textImageModel" placeholder="e.g. fal-ai/nano-banana-2">
+                    </div>
+                    <div class="form-group">
+                        <label for="imageEditModel">Photo Edit Model (add text to photos)</label>
+                        <input type="text" id="imageEditModel" placeholder="e.g. fal-ai/nano-banana-2/edit">
+                    </div>
+                    <div class="form-group">
+                        <label for="imageAspect">Image Aspect Ratio</label>
+                        <select id="imageAspect">
+                            <option value="1:1">1:1 — Square (Instagram feed)</option>
+                            <option value="4:3">4:3 — Landscape</option>
+                            <option value="3:4">3:4 — Portrait</option>
+                            <option value="16:9">16:9 — Wide</option>
+                            <option value="9:16">9:16 — Story / Reel</option>
+                        </select>
                     </div>
                 </div>
 
                 <div class="form-group">
-                    <label for="copySystemPrompt">Copywriter System Prompt (Master Instructions)</label>
+                    <label for="brandStyle">Brand Style (woven into every image prompt)</label>
+                    <textarea id="brandStyle" placeholder="e.g. Warm golden lighting, coral and navy palette, friendly small-business feel — never corporate stock-photo look"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="copySystemPrompt">Image Prompt Enhancer — System Prompt (Master Instructions)</label>
                     <textarea id="copySystemPrompt" required></textarea>
                 </div>
 
@@ -306,7 +329,8 @@
                 const data = await res.json();
                 
                 const fields = [
-                    'allowedChatIds', 'copySystemPrompt', 'copyModel', 'fluxModel',
+                    'allowedChatIds', 'copySystemPrompt', 'copyModel',
+                    'imageModel', 'textImageModel', 'imageEditModel', 'imageAspect', 'brandStyle',
                     'openRouterApiKey', 'anthropicApiKey', 'deepseekApiKey', 'falKey', 'zernioApiKey'
                 ];
                 
@@ -339,7 +363,11 @@
                 allowedChatIds: document.getElementById('allowedChatIds').value,
                 copySystemPrompt: document.getElementById('copySystemPrompt').value,
                 copyModel: document.getElementById('copyModel').value,
-                fluxModel: document.getElementById('fluxModel').value,
+                imageModel: document.getElementById('imageModel').value,
+                textImageModel: document.getElementById('textImageModel').value,
+                imageEditModel: document.getElementById('imageEditModel').value,
+                imageAspect: document.getElementById('imageAspect').value,
+                brandStyle: document.getElementById('brandStyle').value,
                 openRouterApiKey: document.getElementById('openRouterApiKey').value,
                 anthropicApiKey: document.getElementById('anthropicApiKey').value,
                 deepseekApiKey: document.getElementById('deepseekApiKey').value,

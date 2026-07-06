@@ -27,7 +27,6 @@ const envSchema = z.object({
   OPENROUTER_API_KEY: cleanString.default(""),
   COPY_MODEL: cleanString.default("deepseek/deepseek-chat"),
   FAL_KEY: cleanString.default(""),
-  FLUX_MODEL: cleanString.default("fal-ai/flux/dev"),
   COMFYUI_URL: cleanString.pipe(z.string().url()).default("http://127.0.0.1:8188"),
   ZERNIO_API_KEY: cleanString.pipe(z.string().min(1, "required")),
   DAILY_DREAM_LIMIT: z.coerce.number().int().positive().default(20),
