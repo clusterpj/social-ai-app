@@ -4,11 +4,19 @@ import { log } from "../log";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { downloadToMedia, newMediaFilename } from "../media";
-import { enhanceImagePrompt } from "./copy";
+import { enhanceImagePrompt, extractTextOverlay } from "./copy";
 import { getSettings } from "../db";
 import sharp from "sharp";
 
-
+/** fal.subscribe can't take an AbortSignal — race it against a timer instead. */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out`)), ms),
+    ),
+  ]);
+}
 
 /**
  * Call fal.ai to generate an image using Flux, then download it locally.
@@ -25,7 +33,24 @@ export async function generateImage(
   
   log("info", "image_generation_started", { prompt_len: prompt.length });
 
-  const enhancedPrompt = await enhanceImagePrompt(prompt, Math.min(timeoutMs, 15_000));
+  // If the user asked for text ON the image, generate a text-free scene and
+  // composite the text afterwards — diffusion models can't spell reliably.
+  const overlay = await extractTextOverlay(prompt, Math.min(timeoutMs, 10_000));
+  const enhancedPrompt = await enhanceImagePrompt(prompt, Math.min(timeoutMs, 15_000), overlay !== null);
+
+  const applyOverlay = async (): Promise<string> => {
+    if (overlay) {
+      try {
+        await addTextToImage(filename, overlay.text, overlay.style, timeoutMs);
+      } catch (err) {
+        // A missing overlay is visible in the preview; better than failing the dream.
+        log("warn", "overlay_composite_failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return filename;
+  };
 
   const settings = getSettings();
   fal.config({ credentials: settings.falKey });
@@ -97,8 +122,8 @@ export async function generateImage(
       const url = `https://picsum.photos/seed/${encodeURIComponent(prompt.slice(0, 20))}/800/600.jpg`;
       await downloadToMedia(url, filename, timeoutMs);
     }
-    
-    return filename;
+
+    return applyOverlay();
   }
 
   // Currently we use fal.subscribe to poll for the result.
@@ -147,7 +172,7 @@ export async function generateImage(
     // Download the image locally
     await downloadToMedia(imageUrl, filename, timeoutMs);
 
-    return filename;
+    return applyOverlay();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log("error", "image_generation_failed", { error: message });
@@ -183,9 +208,13 @@ export async function addTextToImage(
       
       // 1. Generate text image
       const textPrompt = `3D typography, the exact word '${text}' constructed entirely out of ${style}, hyper-realistic, isolated on a pure white background.`;
-      const genRes: any = await fal.subscribe(settings.fluxModel, {
-        input: { prompt: textPrompt, image_size: "landscape_4_3" },
-      });
+      const genRes: any = await withTimeout(
+        fal.subscribe(settings.fluxModel, {
+          input: { prompt: textPrompt, image_size: "landscape_4_3" },
+        }),
+        timeoutMs,
+        "Styled text generation",
+      );
       const generatedImageUrl = genRes.data?.images?.[0]?.url || genRes.images?.[0]?.url;
 
       if (!generatedImageUrl) {
@@ -195,9 +224,13 @@ export async function addTextToImage(
       log("info", "removing_background", { url: generatedImageUrl });
 
       // 2. Remove background
-      const rmbgRes: any = await fal.subscribe("fal-ai/bria/background/remove", {
-        input: { image_url: generatedImageUrl },
-      });
+      const rmbgRes: any = await withTimeout(
+        fal.subscribe("fal-ai/bria/background/remove", {
+          input: { image_url: generatedImageUrl },
+        }),
+        timeoutMs,
+        "Background removal",
+      );
       const transparentUrl = rmbgRes.image?.url || rmbgRes.data?.image?.url;
 
       if (!transparentUrl) {
@@ -205,7 +238,7 @@ export async function addTextToImage(
       }
 
       // 3. Download the transparent PNG overlay
-      const overlayReq = await fetch(transparentUrl);
+      const overlayReq = await fetch(transparentUrl, { signal: AbortSignal.timeout(timeoutMs) });
       overlayBuffer = Buffer.from(await overlayReq.arrayBuffer());
     } else {
       // Deterministic SVG fallback
@@ -216,9 +249,18 @@ export async function addTextToImage(
       const width = metadata.width || 800;
       const height = metadata.height || 600;
       
+      const escaped = text
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+
       const bannerHeight = Math.floor(height * 0.2);
-      const fontSize = Math.floor(bannerHeight * 0.6);
-      
+      // ponytail: ~0.55em avg bold-sans glyph width; swap for real text measuring if it ever misfits
+      const fontSize = Math.min(
+        Math.floor(bannerHeight * 0.6),
+        Math.floor((width * 0.9) / (Math.max(1, text.length) * 0.55)),
+      );
+
       const svgText = `
         <svg width="${width}" height="${height}">
           <style>
@@ -226,7 +268,7 @@ export async function addTextToImage(
             .bg { fill: rgba(0,0,0,0.6); }
           </style>
           <rect x="0" y="${height - bannerHeight}" width="${width}" height="${bannerHeight}" class="bg" />
-          <text x="50%" y="${height - (bannerHeight / 2) + (fontSize * 0.35)}" text-anchor="middle" class="title">${text}</text>
+          <text x="50%" y="${height - (bannerHeight / 2) + (fontSize * 0.35)}" text-anchor="middle" class="title">${escaped}</text>
         </svg>
       `;
       overlayBuffer = Buffer.from(svgText);

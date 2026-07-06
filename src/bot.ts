@@ -4,9 +4,10 @@ import { errorBoundary } from "./middleware/errors";
 import { allowlist } from "./middleware/allowlist";
 import { helpCommand } from "./commands/help";
 import { statusCommand } from "./commands/status";
-import { postCommand } from "./commands/post";
+import { postCommand, continuePostIdea } from "./commands/post";
 import { dreamCommand } from "./commands/dream";
-import { callbackRouter } from "./callbacks";
+import { callbackRouter, handleTweakReply } from "./callbacks";
+import { getDraft } from "./db";
 import { errorFields, log } from "./log";
 
 export const bot = new Bot(config.TELEGRAM_BOT_TOKEN);
@@ -17,18 +18,10 @@ bot.use(allowlist);
 bot.command(["start", "help"], helpCommand);
 bot.command("status", statusCommand);
 
-// Track A: /post — handle both as a command on text and as a caption on photos.
-// grammY `command` only matches text messages, so we also listen for photos
-// whose caption starts with /post.
+// Track A: /post — any photo starts the flow; the caption (with or without
+// a /post prefix) is the idea. `/post` as plain text shows the how-to hint.
 bot.command("post", postCommand);
-bot.on("message:photo", async (ctx, next) => {
-  const caption = ctx.message.caption ?? "";
-  if (caption.startsWith("/post")) {
-    await postCommand(ctx);
-  } else {
-    await next();
-  }
-});
+bot.on("message:photo", postCommand);
 
 // Track B: /dream
 bot.command("dream", dreamCommand);
@@ -52,13 +45,15 @@ bot.on("message:text", async (ctx, next) => {
   if (!draftId) {
     return next();
   }
-  const tweakInstruction = ctx.message.text;
 
-  // We can just reuse handleRegenerateCopy, but we need to pass the tweak.
-  // Wait, handleRegenerateCopy is in callbacks.ts and expects a context.
-  // Instead of tightly coupling, let's import the specific tweak copy function from callbacks.ts.
-  const { handleTweakReply } = await import("./callbacks");
-  await handleTweakReply(ctx, draftId, tweakInstruction);
+  // A post draft still waiting for its idea (photo sent with no caption)
+  // gets completed; anything else is a copy tweak.
+  const draft = getDraft(draftId);
+  if (draft && draft.kind === "post" && draft.prompt === "" && draft.status === "pending") {
+    await continuePostIdea(ctx, draftId, ctx.message.text);
+  } else {
+    await handleTweakReply(ctx, draftId, ctx.message.text);
+  }
 });
 
 // Safety net for anything the boundary middleware cannot reach.

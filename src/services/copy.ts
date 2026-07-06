@@ -246,22 +246,28 @@ export async function generateCopy(
 /**
  * Enhance the user's raw prompt for the image generator.
  */
-export async function enhanceImagePrompt(prompt: string, timeoutMs = 15_000): Promise<string> {
+export async function enhanceImagePrompt(prompt: string, timeoutMs = 15_000, stripText = false): Promise<string> {
   const settings = getSettings();
   const systemPrompt = settings.copySystemPrompt;
+
+  // When the text will be composited as an overlay afterwards, the diffusion
+  // prompt must describe a text-free scene — diffused text spells unreliably.
+  const userPrompt = stripText
+    ? `${prompt}\n\nIMPORTANT: any promotional text will be composited onto the image afterwards. Your prompt must describe the scene with NO text, words, signs, lettering or typography of any kind, and leave clean space in the lower part of the composition.`
+    : prompt;
 
   try {
     let rawText: string;
     if (settings.openRouterApiKey) {
-      rawText = await callOpenRouter(systemPrompt, prompt, timeoutMs);
+      rawText = await callOpenRouter(systemPrompt, userPrompt, timeoutMs);
     } else {
       try {
-        rawText = await callAnthropic(systemPrompt, prompt, timeoutMs);
+        rawText = await callAnthropic(systemPrompt, userPrompt, timeoutMs);
       } catch (anthropicErr) {
         log("warn", "anthropic_enhance_failed_fallback", {
           error: anthropicErr instanceof Error ? anthropicErr.message : String(anthropicErr),
         });
-        rawText = await callDeepseek(systemPrompt, prompt, timeoutMs);
+        rawText = await callDeepseek(systemPrompt, userPrompt, timeoutMs);
       }
     }
 
@@ -280,7 +286,9 @@ export async function enhanceImagePrompt(prompt: string, timeoutMs = 15_000): Pr
   } catch (err) {
     log("error", "enhance_prompt_failed", { error: err instanceof Error ? err.message : String(err) });
     // Fallback to original prompt with hardcoded constraints
-    return `${prompt}, bold typography if any text, clean composition, NO fine print, NO small text, NO disclaimers`;
+    return stripText
+      ? `${prompt}, clean composition, empty space in the lower third, no text, no lettering`
+      : `${prompt}, bold typography if any text, clean composition, NO fine print, NO small text, NO disclaimers`;
   }
 }
 
