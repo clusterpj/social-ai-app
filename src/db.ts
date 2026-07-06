@@ -242,6 +242,10 @@ export function updateDraftCopyJson(id: string, copyJson: string): void {
   db.run("UPDATE drafts SET copy_json = ?1 WHERE id = ?2", [copyJson, id]);
 }
 
+export function updateDraftPrompt(id: string, prompt: string): void {
+  db.run("UPDATE drafts SET prompt = ?1 WHERE id = ?2", [prompt, id]);
+}
+
 export function updateDraftImagePath(id: string, imagePath: string): void {
   db.run("UPDATE drafts SET image_path = ?1 WHERE id = ?2", [imagePath, id]);
 }

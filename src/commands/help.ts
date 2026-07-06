@@ -3,7 +3,7 @@ import type { Context } from "grammy";
 const HELP_TEXT = [
   "<b>Social Command Center</b> 🚀",
   "",
-  "📸 <b>/post</b> — envía una <i>foto</i> con el caption <code>/post tu idea</code> y genero el copy para cada red. / Send a <i>photo</i> captioned <code>/post your idea</code> and I'll write per-platform copy.",
+  "📸 <b>Foto</b> — envíame cualquier <i>foto</i> y escribo el copy para cada red. El caption es tu idea (opcional — si no, te la pregunto). / Send me any <i>photo</i> and I'll write per-platform copy. The caption is your idea (optional — I'll ask if it's missing).",
   "",
   "🎨 <b>/dream</b> — <code>/dream descripción de la imagen</code> y genero imagen + copy. / <code>/dream image description</code> generates image + copy.",
   "",

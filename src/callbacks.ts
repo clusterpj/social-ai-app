@@ -69,17 +69,19 @@ async function handlePublish(ctx: Context, draftId: string): Promise<void> {
     return;
   }
 
+  // Zernio must be able to fetch the image — refuse rather than publish a broken/placeholder URL.
+  const mediaUrls = draft.imagePath ? [mediaPublicUrl(draft.imagePath)] : [];
+  if (mediaUrls.some((u) => /localhost|127\.0\.0\.1/.test(u))) {
+    await ctx.answerCallbackQuery({
+      text: "⚠️ La imagen no es accesible públicamente — configura PUBLIC_BASE_URL.",
+    });
+    return;
+  }
+
   await ctx.answerCallbackQuery({ text: "Publicando… ⏳" });
 
   try {
     const copyJson = JSON.parse(draft.copyJson) as Record<string, string>;
-    const mediaUrls = draft.imagePath
-      ? [
-          mediaPublicUrl(draft.imagePath).includes("localhost") 
-            ? "https://picsum.photos/800/600.jpg" 
-            : mediaPublicUrl(draft.imagePath)
-        ]
-      : [];
 
     const result = await zernioAdapter.publish({
       accounts: tenant.accountIds.map((id, i) => ({
@@ -102,6 +104,9 @@ async function handlePublish(ctx: Context, draftId: string): Promise<void> {
       }
 
       await editPreviewText(ctx, draft.chatId, draft.previewMsg, lines.join("\n"));
+      if (draft.previewMsg !== null) {
+        await ctx.api.setMessageReaction(draft.chatId, draft.previewMsg, [{ type: "emoji", emoji: "🎉" }]).catch(() => {});
+      }
 
       log("info", "draft_published", {
         draft_id: draftId,

@@ -1,11 +1,32 @@
 import type { Context } from "grammy";
+import { InputFile } from "grammy";
 import { nanoid } from "nanoid";
-import { getTenant, insertDraft, updateDraftPreviewMsg, incrementUsage, todayUtc } from "../db";
+import {
+  getTenant,
+  getDraft,
+  insertDraft,
+  updateDraftPrompt,
+  updateDraftCopyJson,
+  updateDraftPreviewMsg,
+  incrementUsage,
+  todayUtc,
+  type Tenant,
+} from "../db";
 import { generateCopy, extractTextOverlay } from "../services/copy";
 import { addTextToImage } from "../services/image";
 import { downloadToMedia, newMediaFilename, mediaLocalPath } from "../media";
 import { errorFields, log } from "../log";
-import type { Platform } from "../services/publisher/types";
+
+const LOADING_LINES = [
+  "✍️ Escribiendo tu post… / Writing your post…",
+  "🧠 Pensando el copy perfecto… / Cooking up the perfect copy…",
+  "🪄 Un momento, la magia toma su tiempo… / One sec, magic takes time…",
+  "🚀 Preparando tu post para despegar… / Prepping your post for takeoff…",
+];
+
+function pickLoadingLine(): string {
+  return LOADING_LINES[Math.floor(Math.random() * LOADING_LINES.length)] ?? LOADING_LINES[0]!;
+}
 
 /**
  * Build the preview message — photo + per-platform copy sections.
@@ -32,7 +53,7 @@ function buildPreview(
 
 /**
  * Build the inline keyboard for the preview message.
- * Track A: [✅ Publicar] [🔄 Texto] [❌ Cancelar]
+ * Track A: [✅ Publicar] [🔄 Texto] [✏️ Ajustar] [❌ Cancelar]
  */
 function buildKeyboard(draftId: string) {
   return {
@@ -59,8 +80,9 @@ function escapeHtml(s: string): string {
 /**
  * /post command handler — Track A.
  *
- * Trigger: photo message whose caption starts with `/post `.
- * If `/post` is sent as plain text (no photo), asks the user to attach one.
+ * Any photo starts the flow: the caption is the idea (a leading `/post` is
+ * accepted but optional). A photo with no caption gets a force-reply asking
+ * for the idea; the reply is routed back via `continuePostIdea`.
  */
 export async function postCommand(ctx: Context): Promise<void> {
   const chatId = ctx.chat?.id;
@@ -75,41 +97,34 @@ export async function postCommand(ctx: Context): Promise<void> {
     return;
   }
 
-  // Check if this is a photo message with /post caption
   const photo = ctx.message?.photo;
   const caption = ctx.message?.caption ?? ctx.message?.text ?? "";
+  // `/post` prefix is optional — any caption text is the idea.
+  const prompt = caption.replace(/^\/post(@\w+)?\s*/i, "").trim();
 
-  // Extract the prompt: everything after `/post `
-  const match = caption.match(/^\/post\s+([\s\S]+)/);
-
-  if (!photo || !match) {
+  if (!photo) {
     await ctx.reply(
-      "📸 Envía una <b>foto</b> con el caption <code>/post tu idea aquí</code>.\n" +
-        "/ Send a <b>photo</b> captioned <code>/post your idea here</code>.",
+      "📸 Envíame una <b>foto</b> y escribo el copy — el caption es tu idea (opcional).\n" +
+        "/ Send me a <b>photo</b> and I'll write the copy — the caption is your idea (optional).",
       { parse_mode: "HTML" },
     );
     return;
   }
 
-  const prompt = match[1]?.trim();
-  if (!prompt) {
-    await ctx.reply(
-      "Escribe tu idea después de /post. / Write your idea after /post.",
-    );
+  const largestPhoto = photo[photo.length - 1];
+  if (!largestPhoto) {
+    await ctx.reply("No se pudo obtener la foto. / Could not get the photo.");
     return;
   }
+
+  // Let them know we saw it 👀
+  await ctx.react("👀").catch(() => {});
 
   const draftId = nanoid(10);
   const filename = newMediaFilename("jpg");
 
   try {
     // 1. Download the largest photo from Telegram
-    const largestPhoto = photo[photo.length - 1];
-    if (!largestPhoto) {
-      await ctx.reply("No se pudo obtener la foto. / Could not get the photo.");
-      return;
-    }
-
     const file = await ctx.api.getFile(largestPhoto.file_id);
     if (!file.file_path) {
       await ctx.reply("No se pudo descargar la foto. / Could not download the photo.");
@@ -125,32 +140,102 @@ export async function postCommand(ctx: Context): Promise<void> {
       filename,
     });
 
-    // 1b. Check if we need to overlay text and process image
-    const textOverlay = await extractTextOverlay(prompt);
-    if (textOverlay) {
-      // Show an indicator since AI image processing takes a few seconds
-      await ctx.replyWithChatAction("upload_photo").catch(() => {});
-      await addTextToImage(filename, textOverlay.text, textOverlay.style);
-    }
-
-    // 2. Generate per-platform copy via Haiku
-    const copyResult = await generateCopy(prompt, tenant.platforms);
-    const copyJson = copyResult as Record<string, string>;
-
-    // 3. Persist draft
+    // 2. Persist the draft now — copy is filled in by finishPost.
     insertDraft({
       id: draftId,
       chatId,
       kind: "post",
       prompt,
       imagePath: filename,
-      copyJson: JSON.stringify(copyJson),
+      copyJson: "{}",
     });
 
-    // 4. Increment usage counter
+    // 3. No caption? Ask for the idea and finish when they reply.
+    if (!prompt) {
+      await ctx.reply(
+        `📸 ¡Buena foto! ¿Qué quieres contar? Responde a este mensaje con tu idea.\n` +
+          `/ Nice shot! What's the story? Reply to this message with your idea. [Borrador: ${draftId}]`,
+        { reply_markup: { force_reply: true } },
+      );
+      return;
+    }
+
+    await finishPost(ctx, tenant, draftId, filename, prompt);
+  } catch (err) {
+    log("error", "post_command_error", {
+      chat_id: chatId,
+      draft_id: draftId,
+      ...errorFields(err),
+    });
+    await ctx.reply("Algo falló al procesar tu post ⚠️ — inténtalo de nuevo.");
+  }
+}
+
+/**
+ * Continue a photo-first post: the user replied with the idea for a draft
+ * that was created without a caption.
+ */
+export async function continuePostIdea(
+  ctx: Context,
+  draftId: string,
+  prompt: string,
+): Promise<void> {
+  const draft = getDraft(draftId);
+  if (!draft || draft.status !== "pending" || !draft.imagePath) {
+    await ctx.reply("Este borrador ya no está disponible. / This draft is no longer available.");
+    return;
+  }
+
+  const tenant = getTenant(draft.chatId);
+  if (!tenant) return;
+
+  updateDraftPrompt(draftId, prompt);
+
+  try {
+    await finishPost(ctx, tenant, draftId, draft.imagePath, prompt);
+  } catch (err) {
+    log("error", "post_idea_reply_error", {
+      chat_id: draft.chatId,
+      draft_id: draftId,
+      ...errorFields(err),
+    });
+    await ctx.reply("Algo falló al procesar tu post ⚠️ — inténtalo de nuevo.");
+  }
+}
+
+/**
+ * Shared tail of the /post flow: optional text overlay, copy generation,
+ * and the preview message with the action keyboard.
+ */
+async function finishPost(
+  ctx: Context,
+  tenant: Tenant,
+  draftId: string,
+  filename: string,
+  prompt: string,
+): Promise<void> {
+  const chatId = tenant.chatId;
+  const loadingMsg = await ctx.reply(pickLoadingLine());
+  await ctx.api.sendChatAction(chatId, "typing").catch(() => {});
+
+  try {
+    // Overlay text on the photo if the idea asks for it
+    const textOverlay = await extractTextOverlay(prompt);
+    if (textOverlay) {
+      await ctx.api.sendChatAction(chatId, "upload_photo").catch(() => {});
+      await addTextToImage(filename, textOverlay.text, textOverlay.style);
+    }
+
+    // Generate per-platform copy
+    const copyResult = await generateCopy(prompt, tenant.platforms);
+    const copyJson = copyResult as Record<string, string>;
+    updateDraftCopyJson(draftId, JSON.stringify(copyJson));
+
     incrementUsage(chatId, todayUtc(), "posts");
 
-    // 5. Send preview: photo + copy + inline keyboard
+    await ctx.api.deleteMessage(chatId, loadingMsg.message_id).catch(() => {});
+
+    // Send preview: photo + copy + inline keyboard
     const previewText = buildPreview(copyJson, prompt);
     const photoPath = mediaLocalPath(filename);
     const photoFile = Bun.file(photoPath);
@@ -164,7 +249,6 @@ export async function postCommand(ctx: Context): Promise<void> {
       },
     );
 
-    // 6. Save the message ID so callbacks can edit it later
     updateDraftPreviewMsg(draftId, sent.message_id);
 
     log("info", "post_preview_sent", {
@@ -173,14 +257,7 @@ export async function postCommand(ctx: Context): Promise<void> {
       platforms: tenant.platforms.join(","),
     });
   } catch (err) {
-    log("error", "post_command_error", {
-      chat_id: chatId,
-      draft_id: draftId,
-      ...errorFields(err),
-    });
-    await ctx.reply("Algo falló al procesar tu post ⚠️ — inténtalo de nuevo.");
+    await ctx.api.deleteMessage(chatId, loadingMsg.message_id).catch(() => {});
+    throw err;
   }
 }
-
-// grammY InputFile helper — re-export from grammy
-import { InputFile } from "grammy";
