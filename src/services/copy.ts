@@ -62,7 +62,7 @@ async function callAnthropic(systemPrompt: string, userPrompt: string, timeoutMs
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: "claude-3-5-sonnet-20240620",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 2048,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],
@@ -244,17 +244,25 @@ export async function generateCopy(
 }
 
 /**
- * Enhance the user's raw prompt for the image generator.
+ * Enhance the user's raw prompt into an art-direction brief for the image model.
+ * When `overlayText` is set, the brief must include that exact text with a
+ * typographic treatment — the generator (a typography-capable model) renders it.
  */
-export async function enhanceImagePrompt(prompt: string, timeoutMs = 15_000, stripText = false): Promise<string> {
+export async function enhanceImagePrompt(
+  prompt: string,
+  timeoutMs = 15_000,
+  overlayText: string | null = null,
+): Promise<string> {
   const settings = getSettings();
   const systemPrompt = settings.copySystemPrompt;
 
-  // When the text will be composited as an overlay afterwards, the diffusion
-  // prompt must describe a text-free scene — diffused text spells unreliably.
-  const userPrompt = stripText
-    ? `${prompt}\n\nIMPORTANT: any promotional text will be composited onto the image afterwards. Your prompt must describe the scene with NO text, words, signs, lettering or typography of any kind, and leave clean space in the lower part of the composition.`
-    : prompt;
+  let userPrompt = prompt;
+  if (settings.brandStyle) {
+    userPrompt += `\n\nBrand style: ${settings.brandStyle}`;
+  }
+  userPrompt += overlayText
+    ? `\n\nExact text that MUST appear on the image: "${overlayText}". Include its typographic styling and placement in your prompt. No other text anywhere.`
+    : `\n\nNo text or lettering should appear on the image.`;
 
   try {
     let rawText: string;
@@ -286,9 +294,9 @@ export async function enhanceImagePrompt(prompt: string, timeoutMs = 15_000, str
   } catch (err) {
     log("error", "enhance_prompt_failed", { error: err instanceof Error ? err.message : String(err) });
     // Fallback to original prompt with hardcoded constraints
-    return stripText
-      ? `${prompt}, clean composition, empty space in the lower third, no text, no lettering`
-      : `${prompt}, bold typography if any text, clean composition, NO fine print, NO small text, NO disclaimers`;
+    return overlayText
+      ? `${prompt}. Bold, clean typography reading "${overlayText}", professional composition, no other text or fine print anywhere.`
+      : `${prompt}, clean professional composition, no text or lettering`;
   }
 }
 

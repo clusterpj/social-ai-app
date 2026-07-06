@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { downloadToMedia, newMediaFilename } from "../media";
 import { enhanceImagePrompt, extractTextOverlay } from "./copy";
-import { getSettings } from "../db";
+import { getSettings, type AppSettings } from "../db";
 import sharp from "sharp";
 
 /** fal.subscribe can't take an AbortSignal — race it against a timer instead. */
@@ -16,6 +16,46 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
       setTimeout(() => reject(new Error(`${label} timed out`)), ms),
     ),
   ]);
+}
+
+const FLUX_SIZE_BY_ASPECT: Record<string, string> = {
+  "1:1": "square_hd",
+  "4:3": "landscape_4_3",
+  "3:4": "portrait_4_3",
+  "16:9": "landscape_16_9",
+  "9:16": "portrait_16_9",
+};
+
+/** Build the model-family-specific input payload (verified against fal.ai API docs). */
+function buildImageInput(
+  model: string,
+  prompt: string,
+  settings: AppSettings,
+): Record<string, unknown> {
+  if (model.includes("nano-banana")) {
+    return {
+      prompt,
+      aspect_ratio: settings.imageAspect,
+      resolution: "1K",
+      output_format: "jpeg",
+      num_images: 1,
+    };
+  }
+  // FLUX family (and other flux-style endpoints)
+  const input: Record<string, unknown> = {
+    prompt,
+    image_size: FLUX_SIZE_BY_ASPECT[settings.imageAspect] ?? "square_hd",
+    guidance_scale: settings.fluxGuidanceScale,
+    num_images: 1,
+    enable_safety_checker: true,
+    output_format: "jpeg",
+    sync_mode: false,
+  };
+  // FLUX.1 endpoints accept step count; FLUX.2 ones reject unknown params
+  if (model.startsWith("fal-ai/flux/")) {
+    input.num_inference_steps = settings.fluxInferenceSteps;
+  }
+  return input;
 }
 
 /**
@@ -33,11 +73,13 @@ export async function generateImage(
   
   log("info", "image_generation_started", { prompt_len: prompt.length });
 
-  // If the user asked for text ON the image, generate a text-free scene and
-  // composite the text afterwards — diffusion models can't spell reliably.
+  // If the user asked for text ON the image, route to the typography-capable
+  // model and have the enhancer spec the exact text + treatment in the prompt.
   const overlay = await extractTextOverlay(prompt, Math.min(timeoutMs, 10_000));
-  const enhancedPrompt = await enhanceImagePrompt(prompt, Math.min(timeoutMs, 15_000), overlay !== null);
+  const enhancedPrompt = await enhanceImagePrompt(prompt, Math.min(timeoutMs, 15_000), overlay?.text ?? null);
 
+  // Composite fallback — only used by the stub/dev path below; the real
+  // models render the text themselves.
   const applyOverlay = async (): Promise<string> => {
     if (overlay) {
       try {
@@ -126,21 +168,10 @@ export async function generateImage(
     return applyOverlay();
   }
 
-  // Currently we use fal.subscribe to poll for the result.
-  // The SDK internally handles timeouts, but we can't easily pass AbortSignal.
-  // We'll wrap it in a timeout locally just in case.
-  // We'll wrap it in a timeout locally just in case.
+  const model = overlay ? settings.textImageModel : settings.imageModel;
 
-  const fetchTask = fal.subscribe(settings.fluxModel, {
-    input: {
-      prompt: enhancedPrompt,
-      image_size: "landscape_4_3",
-      num_inference_steps: settings.fluxInferenceSteps,
-      guidance_scale: settings.fluxGuidanceScale,
-      num_images: 1,
-      enable_safety_checker: true,
-      sync_mode: false,
-    },
+  const fetchTask = fal.subscribe(model, {
+    input: buildImageInput(model, enhancedPrompt, settings),
     logs: true,
     onQueueUpdate: (update) => {
       if (update.status === "IN_PROGRESS" && update.logs) {
@@ -167,12 +198,13 @@ export async function generateImage(
       throw new Error(`No image URL returned from fal.ai. Response: ${JSON.stringify(res)}`);
     }
 
-    log("info", "image_generated", { url: imageUrl });
+    log("info", "image_generated", { url: imageUrl, model });
 
     // Download the image locally
     await downloadToMedia(imageUrl, filename, timeoutMs);
 
-    return applyOverlay();
+    // The typography model rendered any requested text — no composite needed.
+    return filename;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log("error", "image_generation_failed", { error: message });
@@ -181,8 +213,9 @@ export async function generateImage(
 }
 
 /**
- * Add a true graphic overlay to an existing image.
- * Uses AI stylization if a style is requested.
+ * Add text to an existing image, styled to match the photo.
+ * Preferred path: one instruction-following edit call (imageEditModel).
+ * Fallback: deterministic SVG banner composite — always spells correctly.
  * Overwrites the local file.
  */
 export async function addTextToImage(
@@ -198,108 +231,90 @@ export async function addTextToImage(
     throw new Error(`File not found: ${localPath}`);
   }
 
+  const settings = getSettings();
+
+  if (settings.falKey && settings.falKey !== "stub") {
+    try {
+      fal.config({ credentials: settings.falKey });
+
+      const bytes = await Bun.file(localPath).arrayBuffer();
+      const uploadUrl = await withTimeout(
+        fal.storage.upload(new File([bytes], filename, { type: "image/jpeg" })),
+        timeoutMs,
+        "Image upload",
+      );
+
+      const treatment = style
+        ? `styled as ${style}`
+        : "as bold, clean promotional typography that matches the photo's lighting and style";
+      const editPrompt =
+        `Add the text "${text}" to this photo, ${treatment}. ` +
+        `Place it prominently without covering the main subject and keep everything else in the photo unchanged. ` +
+        `The text must read exactly "${text}" — no other text anywhere.`;
+
+      const res: any = await withTimeout(
+        fal.subscribe(settings.imageEditModel, {
+          input: { prompt: editPrompt, image_urls: [uploadUrl], output_format: "jpeg" },
+        }),
+        timeoutMs,
+        "Image text edit",
+      );
+
+      const editedUrl = res.data?.images?.[0]?.url || res.images?.[0]?.url;
+      if (!editedUrl) {
+        throw new Error("No image returned from edit model");
+      }
+
+      const dl = await fetch(editedUrl, { signal: AbortSignal.timeout(timeoutMs) });
+      if (!dl.ok) throw new Error(`Edited image download failed: ${dl.status}`);
+      await Bun.write(localPath, Buffer.from(await dl.arrayBuffer()));
+
+      log("info", "text_edit_completed", { filename, model: settings.imageEditModel });
+      return;
+    } catch (err) {
+      log("warn", "ai_text_edit_failed_fallback_svg", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Deterministic SVG banner fallback
   try {
-    let overlayBuffer: Buffer;
-    const settings = getSettings();
-    fal.config({ credentials: settings.falKey });
+    log("info", "generating_svg_text_overlay", { text });
 
-    if (style && settings.falKey && settings.falKey !== "stub") {
-      log("info", "generating_ai_styled_text", { text, style });
-      
-      // 1. Generate text image
-      const textPrompt = `3D typography, the exact word '${text}' constructed entirely out of ${style}, hyper-realistic, isolated on a pure white background.`;
-      const genRes: any = await withTimeout(
-        fal.subscribe(settings.fluxModel, {
-          input: { prompt: textPrompt, image_size: "landscape_4_3" },
-        }),
-        timeoutMs,
-        "Styled text generation",
-      );
-      const generatedImageUrl = genRes.data?.images?.[0]?.url || genRes.images?.[0]?.url;
+    const metadata = await sharp(localPath).metadata();
+    const width = metadata.width || 800;
+    const height = metadata.height || 600;
 
-      if (!generatedImageUrl) {
-        throw new Error("Failed to generate styled text");
-      }
+    const escaped = text
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;");
 
-      log("info", "removing_background", { url: generatedImageUrl });
+    const bannerHeight = Math.floor(height * 0.2);
+    // ponytail: ~0.55em avg bold-sans glyph width; swap for real text measuring if it ever misfits
+    const fontSize = Math.min(
+      Math.floor(bannerHeight * 0.6),
+      Math.floor((width * 0.9) / (Math.max(1, text.length) * 0.55)),
+    );
 
-      // 2. Remove background
-      const rmbgRes: any = await withTimeout(
-        fal.subscribe("fal-ai/bria/background/remove", {
-          input: { image_url: generatedImageUrl },
-        }),
-        timeoutMs,
-        "Background removal",
-      );
-      const transparentUrl = rmbgRes.image?.url || rmbgRes.data?.image?.url;
+    const svgText = `
+      <svg width="${width}" height="${height}">
+        <style>
+          .title { fill: white; font-size: ${fontSize}px; font-weight: bold; font-family: sans-serif; }
+          .bg { fill: rgba(0,0,0,0.6); }
+        </style>
+        <rect x="0" y="${height - bannerHeight}" width="${width}" height="${bannerHeight}" class="bg" />
+        <text x="50%" y="${height - (bannerHeight / 2) + (fontSize * 0.35)}" text-anchor="middle" class="title">${escaped}</text>
+      </svg>
+    `;
 
-      if (!transparentUrl) {
-        throw new Error("Failed to remove background");
-      }
-
-      // 3. Download the transparent PNG overlay
-      const overlayReq = await fetch(transparentUrl, { signal: AbortSignal.timeout(timeoutMs) });
-      overlayBuffer = Buffer.from(await overlayReq.arrayBuffer());
-    } else {
-      // Deterministic SVG fallback
-      log("info", "generating_svg_text_overlay", { text });
-      
-      // We need the dimensions of the original image
-      const metadata = await sharp(localPath).metadata();
-      const width = metadata.width || 800;
-      const height = metadata.height || 600;
-      
-      const escaped = text
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;");
-
-      const bannerHeight = Math.floor(height * 0.2);
-      // ponytail: ~0.55em avg bold-sans glyph width; swap for real text measuring if it ever misfits
-      const fontSize = Math.min(
-        Math.floor(bannerHeight * 0.6),
-        Math.floor((width * 0.9) / (Math.max(1, text.length) * 0.55)),
-      );
-
-      const svgText = `
-        <svg width="${width}" height="${height}">
-          <style>
-            .title { fill: white; font-size: ${fontSize}px; font-weight: bold; font-family: sans-serif; }
-            .bg { fill: rgba(0,0,0,0.6); }
-          </style>
-          <rect x="0" y="${height - bannerHeight}" width="${width}" height="${bannerHeight}" class="bg" />
-          <text x="50%" y="${height - (bannerHeight / 2) + (fontSize * 0.35)}" text-anchor="middle" class="title">${escaped}</text>
-        </svg>
-      `;
-      overlayBuffer = Buffer.from(svgText);
-    }
-
-    // 4. Composite the overlay onto the original image
-    log("info", "compositing_overlay", { filename });
-    
-    const originalImage = sharp(localPath);
-    const metadata = await originalImage.metadata();
-    const originalWidth = metadata.width || 800;
-    
-    if (style && settings.falKey && settings.falKey !== "stub") {
-      // For AI overlays, we want to trim the empty space and resize it
-      // to fit nicely at the bottom (e.g. 80% of the original width)
-      const targetWidth = Math.floor(originalWidth * 0.8);
-      
-      overlayBuffer = await sharp(overlayBuffer)
-        .trim() // Removes the transparent background padding
-        .resize({ width: targetWidth })
-        .toBuffer();
-    }
-    
-    // We output to a temporary buffer first
-    const outputBuffer = await originalImage
-      .composite([{ input: overlayBuffer, gravity: 'south' }])
+    const outputBuffer = await sharp(localPath)
+      .composite([{ input: Buffer.from(svgText), gravity: "south" }])
       .toBuffer();
 
-    // 5. Overwrite the original file
     await Bun.write(localPath, outputBuffer);
-    
+
     log("info", "text_overlay_completed", { filename });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
