@@ -1,0 +1,14 @@
+# deps
+node_modules/
+
+# env — never commit real values
+.env
+.env_local
+.env_remote
+.env.*
+!.env.example
+
+# runtime
+app.db
+*.log
+logs/

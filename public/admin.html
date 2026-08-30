@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Command Center — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ── Tokens ─────────────────────────────────────────────── */
+  :root {
+    --bg:        #0D1417;
+    --panel:     #131C21;
+    --panel-2:   #182329;
+    --line:      #24313A;
+    --ink:       #E9E4D8;
+    --muted:     #8FA0A6;
+    --amber:     #FFB224;
+    --amber-dim: #C77D00;
+    --ok:        #3ECF8E;
+    --bad:       #FF5C5C;
+    --mono:      "Spline Sans Mono", ui-monospace, monospace;
+    --sans:      "Barlow", system-ui, sans-serif;
+    --display:   "Barlow Condensed", var(--sans);
+    --rail-w:    200px;
+  }
+
+  * { box-sizing: border-box; margin: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 400 15px/1.55 var(--sans);
+    min-height: 100vh;
+  }
+
+  ::selection { background: var(--amber-dim); color: #0D1417; }
+
+  :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; border-radius: 2px; }
+
+  /* ── Console strip (signature) ──────────────────────────── */
+  .console {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; gap: 24px;
+    padding: 14px 28px;
+    background: linear-gradient(180deg, #10191E 0%, #0D1417 100%);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand {
+    font: 700 22px/1 var(--display);
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .brand small {
+    display: block;
+    font: 500 10px/1 var(--sans);
+    letter-spacing: .28em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 5px;
+  }
+  .lamps {
+    display: flex; align-items: center; gap: 20px;
+    margin-left: auto;
+    font-family: var(--mono); font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase; letter-spacing: .1em;
+  }
+  .lamp { display: flex; align-items: center; gap: 7px; }
+  .lamp i {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: #3A4750;
+    box-shadow: 0 0 0 3px rgba(255,255,255,.03);
+  }
+  .lamp.on i  { background: var(--ok);  box-shadow: 0 0 8px rgba(62,207,142,.7); }
+  .lamp.off i { background: var(--bad); box-shadow: 0 0 8px rgba(255,92,92,.7); }
+  .lamp.on i { animation: breathe 3s ease-in-out infinite; }
+  @keyframes breathe { 50% { opacity: .55; } }
+  @media (prefers-reduced-motion: reduce) { .lamp.on i { animation: none; } }
+  .readout b { color: var(--ink); font-weight: 500; }
+
+  /* ── Shell: rail + main ─────────────────────────────────── */
+  .shell {
+    display: grid;
+    grid-template-columns: var(--rail-w) minmax(0, 760px);
+    gap: 40px;
+    max-width: 1060px;
+    margin: 0 auto;
+    padding: 36px 28px 140px;
+  }
+
+  .rail { position: sticky; top: 92px; align-self: start; }
+  .rail a {
+    display: block;
+    padding: 9px 14px;
+    color: var(--muted);
+    text-decoration: none;
+    font: 600 14px/1.2 var(--display);
+    text-transform: uppercase; letter-spacing: .12em;
+    border-left: 2px solid var(--line);
+    transition: color .15s, border-color .15s;
+  }
+  .rail a:hover { color: var(--ink); }
+  .rail a.active { color: var(--amber); border-left-color: var(--amber); }
+
+  /* ── Modules ────────────────────────────────────────────── */
+  .module {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 26px 28px 30px;
+    margin-bottom: 28px;
+    scroll-margin-top: 92px;
+  }
+  .module-head {
+    display: flex; align-items: baseline; gap: 12px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 14px; margin-bottom: 22px;
+  }
+  .module-head h2 {
+    font: 700 21px/1 var(--display);
+    text-transform: uppercase; letter-spacing: .08em;
+  }
+  .module-head .tag {
+    font: 500 10px/1 var(--mono);
+    color: var(--amber);
+    border: 1px solid var(--amber-dim);
+    border-radius: 3px;
+    padding: 3px 6px;
+    letter-spacing: .15em;
+  }
+  .module-head p { margin-left: auto; color: var(--muted); font-size: 13px; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 22px; }
+  .field { margin-bottom: 18px; }
+  .grid-2 .field { margin-bottom: 0; }
+
+  label {
+    display: block;
+    font: 600 12px/1 var(--sans);
+    letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .hint { font-size: 12.5px; color: var(--muted); margin-top: 7px; }
+
+  input[type="text"], input[type="password"], textarea, select {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--ink);
+    font: 400 13.5px/1.5 var(--mono);
+    padding: 10px 12px;
+    transition: border-color .15s;
+  }
+  textarea { min-height: 110px; resize: vertical; font-family: var(--sans); font-size: 14px; }
+  #copySystemPrompt { min-height: 220px; font-family: var(--mono); font-size: 13px; }
+  input:focus, textarea:focus, select:focus { border-color: var(--amber-dim); outline: none; }
+
+  /* Preset chips */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+  .chips button {
+    font: 500 11px/1 var(--mono);
+    color: var(--muted);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 5px 10px;
+    cursor: pointer;
+    transition: color .15s, border-color .15s;
+  }
+  .chips button:hover { color: var(--amber); border-color: var(--amber-dim); }
+
+  /* Sliders */
+  .range-row { display: flex; align-items: center; gap: 14px; }
+  input[type="range"] { flex: 1; accent-color: var(--amber); }
+  .range-val {
+    font: 500 14px/1 var(--mono);
+    color: var(--amber);
+    min-width: 42px; text-align: right;
+  }
+
+  /* Key fields */
+  .keyfield { position: relative; }
+  .keyfield input { padding-right: 118px; }
+  .keyfield .tools {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .setchip {
+    font: 500 10px/1 var(--mono);
+    letter-spacing: .1em;
+    padding: 4px 7px; border-radius: 3px;
+  }
+  .setchip.yes { color: var(--ok); background: rgba(62,207,142,.1); }
+  .setchip.no  { color: var(--muted); background: var(--panel-2); }
+  .reveal {
+    font: 600 11px/1 var(--sans);
+    color: var(--muted);
+    background: none; border: none; cursor: pointer;
+    text-transform: uppercase; letter-spacing: .06em;
+    padding: 4px 2px;
+  }
+  .reveal:hover { color: var(--ink); }
+
+  /* ── Save bar ───────────────────────────────────────────── */
+  .savebar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    display: flex; align-items: center; justify-content: center; gap: 18px;
+    padding: 14px;
+    background: rgba(13,20,23,.92);
+    backdrop-filter: blur(6px);
+    border-top: 1px solid var(--amber-dim);
+    transform: translateY(110%);
+    transition: transform .25s ease;
+  }
+  .savebar.show { transform: translateY(0); }
+  @media (prefers-reduced-motion: reduce) { .savebar { transition: none; } }
+  .savebar .note {
+    font: 500 12px/1 var(--mono);
+    color: var(--amber);
+    text-transform: uppercase; letter-spacing: .12em;
+  }
+  .savebar .discard {
+    background: none; border: none;
+    color: var(--muted); font: 500 13px var(--sans);
+    cursor: pointer; text-decoration: underline;
+  }
+  .savebar .discard:hover { color: var(--ink); }
+  .save-btn {
+    font: 700 15px/1 var(--display);
+    text-transform: uppercase; letter-spacing: .1em;
+    color: #14100A;
+    background: var(--amber);
+    border: none; border-radius: 6px;
+    padding: 11px 26px;
+    cursor: pointer;
+  }
+  .save-btn:hover { background: #FFC24E; }
+  .save-btn:disabled { opacity: .6; cursor: wait; }
+
+  /* Toast */
+  .toast {
+    position: fixed; right: 24px; bottom: 84px; z-index: 40;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--ok);
+    border-radius: 6px;
+    padding: 12px 18px;
+    font-size: 14px;
+    opacity: 0; transform: translateY(8px);
+    transition: opacity .2s, transform .2s;
+    pointer-events: none;
+  }
+  .toast.err { border-left-color: var(--bad); }
+  .toast.show { opacity: 1; transform: translateY(0); }
+
+  /* ── Responsive ─────────────────────────────────────────── */
+  @media (max-width: 860px) {
+    .shell { grid-template-columns: 1fr; gap: 0; padding: 20px 16px 140px; }
+    .rail {
+      position: sticky; top: 66px; z-index: 15;
+      display: flex; gap: 4px; overflow-x: auto;
+      background: var(--bg);
+      padding: 8px 0; margin-bottom: 16px;
+    }
+    .rail a { border-left: none; border-bottom: 2px solid var(--line); white-space: nowrap; }
+    .rail a.active { border-bottom-color: var(--amber); }
+    .console { padding: 12px 16px; gap: 12px; }
+    .lamps { gap: 12px; flex-wrap: wrap; }
+    .readout { display: none; }
+    .grid-2 { grid-template-columns: 1fr; }
+    .module-head p { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="console">
+  <div class="brand">Social Command Center<small>Admin console</small></div>
+  <div class="lamps" aria-live="polite">
+    <span class="lamp" id="lamp-server"><i></i>Server</span>
+    <span class="lamp" id="lamp-db"><i></i>Database</span>
+    <span class="readout" id="readout-uptime">Uptime <b>—</b></span>
+    <span class="readout" id="readout-version">v<b>—</b></span>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="rail" aria-label="Sections">
+    <a href="#access" class="active">Access</a>
+    <a href="#image">Image engine</a>
+    <a href="#writing">Writing</a>
+    <a href="#keys">API keys</a>
+  </nav>
+
+  <main>
+    <form id="settings-form">
+
+      <section id="access" class="module">
+        <div class="module-head">
+          <span class="tag">ACC</span><h2>Access</h2>
+          <p>Who can talk to the bot</p>
+        </div>
+        <div class="field">
+          <label for="allowedChatIds">Allowed Telegram chat IDs</label>
+          <input type="text" id="allowedChatIds" required placeholder="123456789, 987654321">
+          <div class="hint">Comma separated. Messages from any other chat are ignored.</div>
+        </div>
+      </section>
+
+      <section id="image" class="module">
+        <div class="module-head">
+          <span class="tag">IMG</span><h2>Image engine</h2>
+          <p>Which models draw, letter, and edit</p>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="imageModel">Image model — no text on image</label>
+            <input type="text" id="imageModel" placeholder="fal-ai/flux-2/turbo">
+            <div class="chips" data-for="imageModel">
+              <button type="button">fal-ai/flux-2/turbo</button>
+              <button type="button">fal-ai/flux-2/pro</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="textImageModel">Image model — text on image</label>
+            <input type="text" id="textImageModel" placeholder="fal-ai/nano-banana-2">
+            <div class="chips" data-for="textImageModel">
+              <button type="button">fal-ai/nano-banana-2</button>
+              <button type="button">fal-ai/flux-2/flex</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="imageEditModel">Photo edit model — add text to photos</label>
+            <input type="text" id="imageEditModel" placeholder="fal-ai/nano-banana-2/edit">
+            <div class="chips" data-for="imageEditModel">
+              <button type="button">fal-ai/nano-banana-2/edit</button>
+              <button type="button">fal-ai/nano-banana-pro/edit</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="imageAspect">Aspect ratio</label>
+            <select id="imageAspect">
+              <option value="1:1">1:1 — Square (Instagram feed)</option>
+              <option value="4:3">4:3 — Landscape</option>
+              <option value="3:4">3:4 — Portrait</option>
+              <option value="16:9">16:9 — Wide</option>
+              <option value="9:16">9:16 — Story / Reel</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="fluxInferenceSteps">Detail level <span style="text-transform:none">(FLUX.1 steps)</span></label>
+            <div class="range-row">
+              <input type="range" id="fluxInferenceSteps" min="20" max="50" step="1">
+              <span class="range-val" id="fluxInferenceSteps-val">35</span>
+            </div>
+          </div>
+          <div class="field">
+            <label for="fluxGuidanceScale">Prompt adherence <span style="text-transform:none">(guidance)</span></label>
+            <div class="range-row">
+              <input type="range" id="fluxGuidanceScale" min="1.0" max="10.0" step="0.1">
+              <span class="range-val" id="fluxGuidanceScale-val">3.5</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="writing" class="module">
+        <div class="module-head">
+          <span class="tag">TXT</span><h2>Writing</h2>
+          <p>The voice behind captions and image prompts</p>
+        </div>
+        <div class="field">
+          <label for="copyModel">Copywriter model</label>
+          <input type="text" id="copyModel" placeholder="deepseek/deepseek-chat">
+          <div class="hint">OpenRouter model ID. Writes platform captions and enhances image prompts.</div>
+        </div>
+        <div class="field">
+          <label for="brandStyle">Brand style</label>
+          <textarea id="brandStyle" placeholder="Warm golden lighting, coral and navy palette, friendly small-business feel — never corporate stock-photo look"></textarea>
+          <div class="hint">Woven into every image prompt. This is what makes images look like your brand.</div>
+        </div>
+        <div class="field">
+          <label for="copySystemPrompt">Image prompt enhancer — system prompt</label>
+          <textarea id="copySystemPrompt" required spellcheck="false"></textarea>
+          <div class="hint">Master instructions for turning a post idea into an art-direction brief.</div>
+        </div>
+      </section>
+
+      <section id="keys" class="module">
+        <div class="module-head">
+          <span class="tag">KEY</span><h2>API keys</h2>
+          <p>Stored on the server, never logged</p>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="openRouterApiKey">OpenRouter — primary LLM</label>
+            <div class="keyfield">
+              <input type="password" id="openRouterApiKey" placeholder="sk-or-v1-…" autocomplete="off">
+              <span class="tools"><span class="setchip no">not set</span><button type="button" class="reveal">Show</button></span>
+            </div>
+          </div>
+          <div class="field">
+            <label for="falKey">fal.ai — image generation</label>
+            <div class="keyfield">
+              <input type="password" id="falKey" placeholder="key:secret" autocomplete="off">
+              <span class="tools"><span class="setchip no">not set</span><button type="button" class="reveal">Show</button></span>
+            </div>
+          </div>
+          <div class="field">
+            <label for="anthropicApiKey">Anthropic — LLM fallback</label>
+            <div class="keyfield">
+              <input type="password" id="anthropicApiKey" placeholder="sk-ant-…" autocomplete="off">
+              <span class="tools"><span class="setchip no">not set</span><button type="button" class="reveal">Show</button></span>
+            </div>
+          </div>
+          <div class="field">
+            <label for="deepseekApiKey">DeepSeek — LLM fallback</label>
+            <div class="keyfield">
+              <input type="password" id="deepseekApiKey" placeholder="sk-…" autocomplete="off">
+              <span class="tools"><span class="setchip no">not set</span><button type="button" class="reveal">Show</button></span>
+            </div>
+          </div>
+          <div class="field">
+            <label for="zernioApiKey">Zernio — publishing</label>
+            <div class="keyfield">
+              <input type="password" id="zernioApiKey" placeholder="sk_…" autocomplete="off">
+              <span class="tools"><span class="setchip no">not set</span><button type="button" class="reveal">Show</button></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </form>
+  </main>
+</div>
+
+<div class="savebar" id="savebar">
+  <span class="note">Unsaved changes</span>
+  <button type="button" class="discard" id="discard-btn">Discard</button>
+  <button type="submit" form="settings-form" class="save-btn" id="save-btn">Save changes</button>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+  // Every setting lives here — add a field to the form and one entry below.
+  const FIELDS = [
+    'allowedChatIds', 'copySystemPrompt', 'copyModel',
+    'imageModel', 'textImageModel', 'imageEditModel', 'imageAspect', 'brandStyle',
+    'openRouterApiKey', 'anthropicApiKey', 'deepseekApiKey', 'falKey', 'zernioApiKey',
+    'fluxInferenceSteps', 'fluxGuidanceScale',
+  ];
+  const NUMERIC = { fluxInferenceSteps: parseInt, fluxGuidanceScale: parseFloat };
+
+  const $ = (id) => document.getElementById(id);
+  let saved = {}; // last-loaded state, for dirty checking
+
+  function currentValues() {
+    const out = {};
+    for (const f of FIELDS) out[f] = NUMERIC[f] ? NUMERIC[f]($(f).value) : $(f).value;
+    return out;
+  }
+
+  function refreshDirty() {
+    const now = currentValues();
+    const dirty = FIELDS.some((f) => String(now[f]) !== String(saved[f]));
+    $('savebar').classList.toggle('show', dirty);
+  }
+
+  function refreshRanges() {
+    for (const id of ['fluxInferenceSteps', 'fluxGuidanceScale']) {
+      $(id + '-val').textContent = $(id).value;
+    }
+  }
+
+  function refreshKeyChips() {
+    document.querySelectorAll('.keyfield').forEach((kf) => {
+      const chip = kf.querySelector('.setchip');
+      const isSet = kf.querySelector('input').value.length > 0;
+      chip.textContent = isSet ? 'set' : 'not set';
+      chip.className = 'setchip ' + (isSet ? 'yes' : 'no');
+    });
+  }
+
+  function toast(msg, isError = false) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.className = 'toast show' + (isError ? ' err' : '');
+    setTimeout(() => t.classList.remove('show'), 3200);
+  }
+
+  async function loadSettings() {
+    try {
+      const res = await fetch('/api/settings');
+      if (!res.ok) throw new Error('Unauthorized');
+      const data = await res.json();
+      for (const f of FIELDS) $(f).value = data[f] ?? '';
+      saved = currentValues();
+      refreshRanges();
+      refreshKeyChips();
+      refreshDirty();
+    } catch (err) {
+      toast('Could not load settings — refresh to sign in again.', true);
+    }
+  }
+
+  async function saveSettings() {
+    const btn = $('save-btn');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(currentValues()),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      saved = currentValues();
+      refreshDirty();
+      refreshKeyChips();
+      toast('Saved. The bot uses the new settings immediately.');
+    } catch (err) {
+      toast('Save failed (' + err.message + ') — nothing was changed.', true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Save changes';
+    }
+  }
+
+  // ── Wiring ─────────────────────────────────────────────────
+  $('settings-form').addEventListener('submit', (e) => { e.preventDefault(); saveSettings(); });
+  $('settings-form').addEventListener('input', () => { refreshRanges(); refreshDirty(); });
+  $('discard-btn').addEventListener('click', () => {
+    for (const f of FIELDS) $(f).value = saved[f] ?? '';
+    refreshRanges(); refreshKeyChips(); refreshDirty();
+  });
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); saveSettings(); }
+  });
+
+  // Preset chips fill their input
+  document.querySelectorAll('.chips').forEach((c) => {
+    c.addEventListener('click', (e) => {
+      if (e.target.tagName !== 'BUTTON') return;
+      $(c.dataset.for).value = e.target.textContent;
+      refreshDirty();
+    });
+  });
+
+  // Show/hide key values
+  document.querySelectorAll('.reveal').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const input = btn.closest('.keyfield').querySelector('input');
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      btn.textContent = show ? 'Hide' : 'Show';
+    });
+  });
+
+  // ── Console status strip: poll /health ─────────────────────
+  function fmtUptime(s) {
+    if (s < 3600) return Math.floor(s / 60) + 'm';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+    return Math.floor(s / 86400) + 'd ' + Math.floor((s % 86400) / 3600) + 'h';
+  }
+  async function pollHealth() {
+    try {
+      const res = await fetch('/health');
+      const h = await res.json();
+      $('lamp-server').className = 'lamp ' + (h.ok ? 'on' : 'off');
+      $('lamp-db').className = 'lamp ' + (h.db === 'ok' ? 'on' : 'off');
+      $('readout-uptime').innerHTML = 'Uptime <b>' + fmtUptime(h.uptime_s) + '</b>';
+      $('readout-version').innerHTML = 'v<b>' + h.version + '</b>';
+    } catch {
+      $('lamp-server').className = 'lamp off';
+      $('lamp-db').className = 'lamp off';
+    }
+  }
+
+  // ── Rail scrollspy ─────────────────────────────────────────
+  const links = document.querySelectorAll('.rail a');
+  const spy = new IntersectionObserver((entries) => {
+    for (const en of entries) {
+      if (!en.isIntersecting) continue;
+      links.forEach((a) => a.classList.toggle('active', a.hash === '#' + en.target.id));
+    }
+  }, { rootMargin: '-30% 0px -60% 0px' });
+  document.querySelectorAll('.module').forEach((m) => spy.observe(m));
+
+  loadSettings();
+  pollHealth();
+  setInterval(pollHealth, 15000);
+</script>
+</body>
+</html>
